@@ -35,7 +35,6 @@ def main():
 
         alpha1 = abs(math.sin(theta))
         alpha2 = abs(math.cos(theta))
-        print(alpha1, alpha2)
 
 
 def init_root(w, h, title):
