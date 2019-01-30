@@ -22,9 +22,9 @@ def main():
         tcod.console_flush()
 
         dx, dy, dr = handle_key()
-        x+=dx
-        y+=dy
-        r+=0 if r+dr<0 else dr
+        x += dx
+        y += dy
+        r += 0 if r+dr < 0 else dr
 
 
 # Is con garbage collected ?
@@ -80,8 +80,7 @@ def process_cmdline():
 
     if len(argv) != 4:
         raise TypeError(f"4 arguments expected, given: {len(argv)}")
-    type_check = (str.isdigit, str.isdigit, lambda x: x.isalpha() and len(x) ==
-                  1, str.isdigit)
+    type_check = (str.isdigit, str.isdigit, lambda x: len(x) == 1, str.isdigit)
 
     good_type = [type_check[i](e) for i, e in enumerate(argv)]
     if not all(good_type):
@@ -97,9 +96,12 @@ def process_cmdline():
 def usage():
     s = "\n".join([
         f"usage : {sys.argv[0]} x y char r",
+        f"",
         f"\t(x,y) are the circle coordinates, and must be of type int",
         f"\tchar is the character used to draw the circle and must be 1 char only",
-        f"\tr is the radius of the circle, and must be of type int"
+        f"\tr is the radius of the circle, and must be of type int",
+        f"",
+        f"\tYou can zoom in/out with y/n and move the circle around with hjkl"
     ])
     return s
 
