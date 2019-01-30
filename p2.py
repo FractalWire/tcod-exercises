@@ -28,19 +28,11 @@ def main():
     bg, country = (0, 0, 0), ""
     mx = my = 0
     while not tcod.console_is_window_closed():
+
         img.blit(canvas, img_x, img_y, tcod.BKGND_SET, img_scale, img_scale, 0)
         canvas.blit(root, 0, 0, 0, 0, width, height)
 
-        label_text = f"{country}"
-        if len(label_text)>0:
-            label_width, label_height = len(label_text)+2, 3
-            label = tcod.console_new(label_width, label_height)
-            label.bg[:] = tcod.black
-            label.fg[:] = tcod.Color(200,200,200)
-            label.ch[:]=ord("#")
-            label.print_(1, 1, label_text)
-            label.blit(root, mx+2, my, 0, 0, label_width, label_height,1,0.7)
-            label.clear()
+        add_label(root, mx+2, my, country)
 
         tcod.console_flush()
         val = handle_events(canvas)
@@ -48,6 +40,19 @@ def main():
             mx, my, bg, country = val
 
         root.clear()
+
+
+def add_label(dest, x, y, country_name):
+    label_text = f"{country_name}"
+    if len(label_text) > 0:
+        label_width, label_height = len(label_text)+2, 3
+        label = tcod.console_new(label_width, label_height)
+        label.bg[:] = tcod.black
+        label.fg[:] = tcod.Color(200, 200, 200)
+        label.ch[:] = ord("#")
+        label.print_(1, 1, label_text)
+        label.blit(dest, x, y, 0, 0, label_width, label_height, 1, 0.7)
+        label.clear()
 
 
 def init_root(w, h):
