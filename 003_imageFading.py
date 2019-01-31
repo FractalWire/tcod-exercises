@@ -7,7 +7,7 @@ def main():
     width = 96
     height = 52
 
-    root = init_root(width, height, "Problem 3: Console fading")
+    root = init_root(width, height, "Challenge 3: Console fading")
 
     canvas1 = tcod.console_new(width, height)
     canvas2 = tcod.console_new(width, height)

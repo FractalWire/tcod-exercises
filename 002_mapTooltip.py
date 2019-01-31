@@ -63,7 +63,7 @@ def init_root(w, h):
     font = "data/fonts/dejavu10x10_gs_tc.png"
     flags = tcod.FONT_TYPE_GREYSCALE | tcod.FONT_LAYOUT_TCOD
     tcod.console_set_custom_font(font, flags)
-    return tcod.console_init_root(w, h, "Problem 2 : interactive ASCII map", False)
+    return tcod.console_init_root(w, h, "Challenge 2 : interactive ASCII map", False)
 
 
 def handle_events(canvas):

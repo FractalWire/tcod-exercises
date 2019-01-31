@@ -69,7 +69,7 @@ def init_root(w, h):
     params = {
         "w": w,
         "h": h,
-        "title": "Problem 1",
+        "title": "Challenge 1: Simple circle",
         "fullscreen": False
     }
     return tcod.console_init_root(**params)
