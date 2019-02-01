@@ -13,9 +13,9 @@ def main():
     canvas2 = tcod.console_new(width, height)
 
     img1 = tcod.image_load("data/img/map-of-europe-clipart.bmp")
-    img1.blit(canvas2, width//2, height//2, tcod.BKGND_SET, 0.05, 0.05, 0)
+    img1.blit(canvas1, width//2, height//2, tcod.BKGND_SET, 0.05, 0.05, 0)
     img2 = tcod.image_load("data/img/ISS027-E-6501_lrg.bmp")
-    img2.blit(canvas1, width//2, height//2, tcod.BKGND_SET, 0.1, 0.1, 0)
+    img2.blit(canvas2, width//2, height//2, tcod.BKGND_SET, 0.1, 0.1, 0)
 
     alpha1 = 1
     alpha2 = 0
@@ -24,17 +24,19 @@ def main():
 
     while not tcod.console_is_window_closed():
         root.clear()
+
+        theta = ((tcod.sys_elapsed_milli() * (2*math.pi)/tempo) %
+                 tempo) % (2*math.pi)
+
+        alpha1 = abs(math.sin(theta))
+        alpha2 = abs(math.cos(theta))
+
         canvas1.blit(root, 0, 0, 0, 0, width, height, alpha1, alpha1)
         canvas2.blit(root, 0, 0, 0, 0, width, height, alpha2, alpha2)
 
         tcod.console_flush()
         handle_key()
 
-        theta = ((tcod.sys_elapsed_milli() * (math.pi)/tempo) %
-                 tempo) % (math.pi)
-
-        alpha1 = abs(math.sin(theta))
-        alpha2 = abs(math.cos(theta))
 
 
 def init_root(w, h, title):

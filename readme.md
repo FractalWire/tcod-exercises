@@ -19,3 +19,6 @@ Using the map used in problem 2, implement :
  * a zoom functionnality to zoom in/out on a specific area of the map with the mouse wheel.
  * a drag and drop functionnality to move around the map.
 
+#### CHALLENGE 5 : ASCII map combined
+
+Combine challenge 2 and 4 in only one, making it as clean as possible.
