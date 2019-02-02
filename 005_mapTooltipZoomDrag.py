@@ -1,6 +1,7 @@
 import numpy as np
 import tcod
 import textwrap
+from typing import Union
 
 COUNTRY_COLOR = {
     (236, 200, 77): "W. Europe",
@@ -13,7 +14,6 @@ COLOR_RANGE = 10
 
 
 def main():
-    #dmouse = DeltaMouse(tcod.Mouse())
     width = height = 50
     root_console = init_root(width, height,
                              "Challenge 5: Cleaner Zoom, drag and tooltip")
@@ -34,14 +34,14 @@ def main():
         tcod.console_flush()
 
 
-def init_root(w, h, title):
+def init_root(w: int, h: int, title: str) -> tcod.console.Console:
     font = "data/fonts/dejavu10x10_gs_tc.png"
     flags = tcod.FONT_TYPE_GREYSCALE | tcod.FONT_LAYOUT_TCOD
     tcod.console_set_custom_font(font, flags)
     return tcod.console_init_root(w, h, title)
 
 
-def handle_events(events):
+def handle_events(events: int) -> None:
     key = tcod.Key()
     mouse = tcod.Mouse()
     evnt_masks = tcod.EVENT_KEY_PRESS | tcod.EVENT_MOUSE
@@ -52,23 +52,18 @@ def handle_events(events):
             m_evnt(mouse)
 
 
-def update_tooltip():
-    raise NotImplementedError()
-
-
-def handle_zoom():
-    raise NotImplementedError()
-
-
 class Canvas:
-    def __init__(self, parent=None, x=0, y=0, width=0, height=0, childs=None,
-                 fg_alpha=1, bg_alpha=1, console=None):
+    def __init__(self, parent: Union['Canvas', None] = None,
+                 x: int = 0, y: int = 0, width: int = 0, height: int = 0,
+                 childs: Union['Canvas', None] = None,
+                 fg_alpha: float = 1, bg_alpha: float = 1,
+                 console: tcod.console.Console = None) -> None:
         self._parent = parent
         if self._parent != None:
             self._parent.childs += [self]
         self.x = x
         self.y = y
-        self.childs = childs if childs else list()
+        self.childs = childs if childs != None else list()
         self.console = console if console != None else tcod.console_new(
             width, height)
         self.fg_alpha = fg_alpha
@@ -77,19 +72,19 @@ class Canvas:
         self.visible = True
 
     @property
-    def parent(self):
+    def parent(self)-> 'Canvas':
         return self._parent
 
-    def blit(self):
+    def blit(self)->None:
         self.console.blit(self.parent.console, self.x,
                           self.y, width=self.console.width, height=self.console.height,
                           fg_alpha=self.fg_alpha, bg_alpha=self.bg_alpha)
 
-    def update(self):
+    def update(self) -> bool:
         if not self.visible:
             return False
         # Leaf
-        if self.childs == []:
+        if len(self.childs) == 0:
             r = self.updated
             self.updated = False
             return r
@@ -106,22 +101,24 @@ class Canvas:
         return r
 
     @property
-    def abs_x(self):
+    def abs_x(self)->int:
         if self.parent == None:
             return self.x
         return self.x + self.parent.abs_x
 
     @property
-    def abs_y(self):
+    def abs_y(self)->int:
         if self.parent == None:
             return self.y
         return self.y + self.parent.abs_y
 
 
 class TooltipTcod:
-    def __init__(self, value, x=0, y=0,
-                 fg_color=tcod.white, bg_color=tcod.black,
-                 fg_alpha=1, bg_alpha=0.7, max_width=-1, max_height=-1):
+    def __init__(self, value: str, x: int = 0, y: int = 0,
+                 fg_color: tcod.Color = tcod.white,
+                 bg_color: tcod.Color = tcod.black,
+                 fg_alpha: float = 1, bg_alpha: float = 0.7,
+                 max_width: int = -1, max_height: int = -1)->None:
         self.value = value
         self.x = x
         self.y = y
@@ -131,23 +128,24 @@ class TooltipTcod:
         self.bg_alpha = bg_alpha
         self.max_width = max_width
         self.max_height = max_height
+        self.console = self.generate_console()
 
-    def generate_console(self):
+    def generate_console(self)->tcod.console.Console:
         if self.value == "":
-            return tcod.console_new(0,0)
+            return tcod.console_new(0, 0)
         lines = []
-        width=height=0
+        width = height = 0
         if self.max_width > 0:
             lines = textwrap.wrap(self.value, self.max_width)
             lines = [" "*((self.max_width-len(e)-1)//2)+e for e in lines]
-            width = min(self.max_width,max(len(L) for L in lines))
+            width = min(self.max_width, max(len(L) for L in lines))
         else:
             lines = [self.value]
             width = len(self.value)
         if self.max_height > 0:
             lines = lines[:self.max_height]
             height = min(self.max_height, len(lines))
-        else :
+        else:
             height = len(lines)
         width += 2
         height += 2
@@ -165,13 +163,12 @@ class TooltipTcod:
 
         return console
 
-    def on_mouse(self, mouse):
-        raise NotImplementedError()
-
 
 class ImageMap:
-    def __init__(self, path, canvas, off_x=0, off_y=0, scale=-1, angle=0,
-                 blend=tcod.BKGND_SET):
+    def __init__(self, path: str, canvas: Canvas,
+                 off_x: int = 0, off_y: int = 0,
+                 scale: float = -1, angle: float = 0,
+                 blend: int = tcod.BKGND_SET)->None:
         self.canvas = canvas
         self.img = tcod.image_load(path)
         self.scale = scale
@@ -190,15 +187,15 @@ class ImageMap:
 
     # Property might just be unnecessary here...
     @property
-    def off_x(self):
+    def off_x(self)->int:
         return round(self._off_x * self.scale)
 
     @property
-    def off_y(self):
+    def off_y(self)->int:
         return round(self._off_y * self.scale)
 
     @off_x.setter
-    def off_x(self, value):
+    def off_x(self, value: int)->None:
         if not isinstance(value, int):
             raise TypeError("off_x must be an integer")
         self._off_x = round(value / self.scale)
@@ -207,7 +204,7 @@ class ImageMap:
             self._off_x = (self._off_x//abs(self._off_x)) * w
 
     @off_y.setter
-    def off_y(self, value):
+    def off_y(self, value: int)->None:
         if not isinstance(value, int):
             raise TypeError("off_y must be an integer")
         self._off_y = round(value / self.scale)
@@ -217,7 +214,7 @@ class ImageMap:
         if abs(self._off_y) >= h:
             self._off_y = (self._off_y//abs(self._off_y)) * h
 
-    def on_mouse(self, mouse):
+    def on_mouse(self, mouse: tcod.Mouse)->None:
         dcx = dcy = dz = 0
         mcx = mouse.cx
         mcy = mouse.cy
@@ -230,23 +227,24 @@ class ImageMap:
 
         m_on_map = m_in_canvas_x and m_in_canvas_y
 
-        #I put that there due to a bug for now but it should be back in the next
-        # if block once it is fixed
-        # Zoom
-        if mouse.wheel_up:
-            dz = 0.01
-        elif mouse.wheel_down:
-            dz = -0.01
-
         if m_on_map:
-            # Tooltip management
-            bg = c.console.bg[m_rel_y,m_rel_x]
+            # Tooltip
+            bg = c.console.bg[m_rel_y, m_rel_x]
             country = ""
             for k, v in COUNTRY_COLOR.items():
                 if all(bg[i]-COLOR_RANGE < k[i] < bg[i]+COLOR_RANGE for i in range(3)):
                     country = v
                     break
-            self.tooltip = TooltipTcod(country, m_rel_x+2, m_rel_y)
+            t = TooltipTcod(country, m_rel_x+1, m_rel_y)
+            if m_rel_x + t.console.width > self.canvas.console.width:
+                t.x = m_rel_x - 1 - t.console.width
+            self.tooltip = t
+
+            # zoom
+            if mouse.wheel_up:
+                dz = self.scale
+            elif mouse.wheel_down:
+                dz = -self.scale / 2
 
             # Drag
             if mouse.lbutton:
@@ -256,18 +254,18 @@ class ImageMap:
 
                 self.clicked = m_on_map
 
-        if dcx != 0:
-            self.off_x += dcx  # watch out for property...
-        if dcy != 0:
-            self.off_y += dcy
-        if dz != 0:
-            self.scale = round(self.scale+dz, 2)
-            if self.scale <= 0:
-                self.scale = 0.01
+            if dcx != 0:
+                self.off_x += dcx  # watch out for property...
+            if dcy != 0:
+                self.off_y += dcy
+            if dz != 0:
+                self.scale = round(self.scale+dz, 2)
+                if self.scale <= 0:
+                    self.scale = 0.01
 
-        self.blit()
+            self.blit()
 
-    def blit(self):
+    def blit(self)->None:
         self.canvas.console.clear()
 
         # map blitting
@@ -278,30 +276,29 @@ class ImageMap:
         self.img.blit(self.canvas.console, img_x, img_y, tcod.BKGND_SET,
                       self.scale, self.scale, self.angle)
 
-        #tooltip blitting
+        # tooltip blitting
         t = self.tooltip
-        tooltip_con = t.generate_console()
-        tooltip_con.blit(self.canvas.console, t.x, t.y,
-                         fg_alpha=t.fg_alpha, bg_alpha=t.bg_alpha)
+        t.console.blit(self.canvas.console, t.x, t.y,
+                       fg_alpha=t.fg_alpha, bg_alpha=t.bg_alpha)
 
         self.canvas.updated = True
 
 
-class DeltaMouse:
-    def __init__(self, mouse):
-        self.mouse = mouse
-        self._pcx = mouse.cx
-        self._pcy = mouse.cy
-        self.dcx = 0
-        self.dcy = 0
-        self.plmb = False
+# class DeltaMouse:
+#     def __init__(self, mouse):
+#         self.mouse = mouse
+#         self._pcx = mouse.cx
+#         self._pcy = mouse.cy
+#         self.dcx = 0
+#         self.dcy = 0
+#         self.plmb = False
 
-    def update(self):
-        self.dcx = self.mouse.cx - self._pcx
-        self.dcy = self.mouse.cy - self._pcy
-        self._pcy = self.mouse.cx
-        self._pcy = self.mouse.cy
-        self.plmb = self.mouse.lbutton
+#     def update(self):
+#         self.dcx = self.mouse.cx - self._pcx
+#         self.dcy = self.mouse.cy - self._pcy
+#         self._pcy = self.mouse.cx
+#         self._pcy = self.mouse.cy
+#         self.plmb = self.mouse.lbutton
 
 
 if __name__ == "__main__":
