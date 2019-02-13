@@ -4,44 +4,13 @@ import tcod
 import tcod.event
 import time
 import textwrap
-import copy
+from tcodplus import interfaces
+from tcodplus import event as tcp_event
 
 
-class IDrawable(abc.ABC):
-    @abc.abstractmethod
-    def draw(self, dest: 'Canvas') -> None:
-        pass
-
-
-class IFocusable(abc.ABC):
-    @abc.abstractmethod
-    def isfocused(self, event: tcod.event.MouseMotion) -> bool:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def focus_dispatcher(self) -> 'EventDispatcher':
-        pass
-
-
-class IUpdatable(abc.ABC):
-    @property
-    @abc.abstractmethod
-    def should_update(self) -> bool:
-        pass
-
-    @should_update.setter
-    @abc.abstractmethod
-    def should_update(self, value: bool) -> None:
-        pass
-
-    @abc.abstractmethod
-    def update(self) -> None:
-        pass
-
-
-Geometry = NamedTuple('Geometry', [(
-    'abs_x', int), ('abs_y', int), ('x', int), ('y', int), ('width', int), ('height', int)])
+Geometry = NamedTuple('Geometry', [('abs_x', int), ('abs_y', int),
+                                   ('x', int), ('y', int),
+                                   ('width', int), ('height', int)])
 
 
 def relative_geometry(dest: 'Canvas', rel_x: Union[int, float],
@@ -65,24 +34,28 @@ def relative_geometry(dest: 'Canvas', rel_x: Union[int, float],
     return Geometry(0, 0, 0, 0, rel_width, rel_height)
 
 
-class Canvas(IDrawable):
+class Canvas(interfaces.IDrawable):
     def __init__(self, x: Union[int, float] = 0, y: Union[int, float] = 0,
                  width: Union[int, float] = 0, height: Union[int, float] = 0,
                  fg_alpha: float = 1, bg_alpha: float = 1,
-                 console: tcod.console.Console = None) -> None:
+                 bg_color: tcod.color.Color = tcod.black,
+                 fg_color: tcod.color.Color = tcod.white,
+                 key_color: tcod.color.Color = None) -> None:
         self.x = x
         self.y = y
         self.width = width
         self.height = height
         self._geom = None
-        if console != None:
-            self._geom = Geometry(0, 0, 0, 0, console.width, console.height)
 
         self.childs = list()
-        self._focused_childs = list()
-        self.console = console
-        self.fg_alpha = fg_alpha
+        self._focused_childs = tcp_event.MouseFocus([], [], [])
+
+        self.console = None
+        self.bg_color = bg_color
+        self.fg_color = fg_color
         self.bg_alpha = bg_alpha
+        self.fg_alpha = fg_alpha
+        self.key_color = key_color
         self.visible = True
 
     @property
@@ -96,31 +69,50 @@ class Canvas(IDrawable):
     def draw(self, dest: 'Canvas') -> None:
         x, y, width, height = self.geometry[2:]
         self.console.blit(dest.console, x, y, 0, 0, width, height,
-                          self.fg_alpha, self.bg_alpha)
+                          self.fg_alpha, self.bg_alpha, self.key_color)
 
-    def update_mouse_focused(self, event: tcod.event.Event) -> List['Canvas']:
-        focusable_childs = [c for c in self.childs if isinstance(c, IFocusable)]
-        focused = [c for c in focusable_childs if c.isfocused(event)]
+    def update_mouse_focused(self, event: tcod.event.MouseMotion) -> None:
+        focusable_childs = [c for c in self.childs if isinstance(
+            c, interfaces.IMouseFocusable)]
+        focused = [c for c in focusable_childs if c.ismousefocused(event)]
 
         childs_focus_gain = [c for c in focused
-                             if c not in self._focused_childs]
-        if len(childs_focus_gain) > 0:
-            evt_mousefocusgain = MouseFocusChange(event,"MOUSEFOCUSGAIN")
-            for c in childs_focus_gain:
-                c.focus_dispatcher.dispatch(evt_mousefocusgain)
-
+                             if c not in self._focused_childs.focused]
         childs_focus_lost = [c for c in focusable_childs
-                             if c in self._focused_childs and c not in focused]
-        if len(childs_focus_lost) > 0:
-            evt_mousefocuslost = MouseFocusChange(event,"MOUSEFOCUSLOST")
-            for c in childs_focus_lost:
-                c.focus_dispatcher.dispatch(evt_mousefocuslost)
+                             if c in self._focused_childs.focused
+                             and c not in focused]
+
+        self._focused_childs = tcp_event.MouseFocus(focused,
+                                                    childs_focus_lost,
+                                                    childs_focus_gain)
 
         for c in self.childs:
-            focused += c.update_mouse_focused(event)
+            c.update_mouse_focused(event)
 
-        self._focused_childs = focused
-        return focused
+    def get_mouse_focused(self) -> None:
+        focused, focus_lost, focus_gain = [list(elt)
+                                           for elt in self._focused_childs]
+        for c in self.childs:
+            c_focused = c.get_mouse_focused()
+            focused += c_focused.focused
+            focus_lost += c_focused.focus_lost
+            focus_gain += c_focused.focus_gain
+
+        return tcp_event.MouseFocus(focused, focus_lost, focus_gain)
+
+    def get_kbd_focusable(self) -> None:
+        focusable_childs = [c for c in self.childs
+                            if isinstance(c, interfaces.IKeyboardFocusable)]
+        for c in self.childs:
+            focusable_childs += c.get_kbd_focusable()
+        return focusable_childs
+
+    def init_console(self, width: int, height: int) -> tcod.console.Console:
+        console = tcod.console_new(width, height)
+        console.default_bg = self.bg_color
+        console.default_fg = self.fg_color
+        console.clear()
+        return console
 
     def update_geometry(self, dest: 'Canvas') -> bool:
 
@@ -133,7 +125,8 @@ class Canvas(IDrawable):
             if geom_old == None \
                     or (geom_new.width != geom_old.width
                         or geom_new.height != geom_old.height):
-                self.console = tcod.console_new(geom_new.width, geom_new.height)
+                self.console = self.init_console(geom_new.width,
+                                                 geom_new.height)
             self._geom = geom_new
             return True
 
@@ -147,7 +140,7 @@ class Canvas(IDrawable):
             up = c.update_geometry(self) or up
 
             # update childs
-            if isinstance(c, IUpdatable):
+            if isinstance(c, interfaces.IUpdatable):
                 if c.should_update:
                     c.update()
                     up = True
@@ -165,131 +158,68 @@ class Canvas(IDrawable):
         return up
 
 
-class CanvasDispatcher:
-    def __init__(self) -> None:
-        self.ev_keydown = []
-        self.ev_keyup = []
-        self.ev_mousemotion = []
-        self.ev_mousebuttondown = []
-        self.ev_mousebuttonup = []
-        self.ev_mousewheel = []
-        self.ev_textinput = []
-        self.ev_mousefocuslost = []
-        self.ev_mousefocusgain = []
+class RootCanvas(Canvas):
+    def __init__(self, width: Union[int, float] = 0,
+                 height: Union[int, float] = 0, title: str = "",
+                 font: str = "",
+                 flags: int = tcod.FONT_LAYOUT_TCOD | tcod.FONT_TYPE_GREYSCALE,
+                 bg_color: tcod.color.Color = tcod.black,
+                 fg_color: tcod.color.Color = tcod.white) -> None:
+        super().__init__(width=width, height=height,
+                         bg_color=bg_color, fg_color=fg_color)
+        self._geom = Geometry(0, 0, 0, 0, width, height)
 
-    def dispatch(self, event: tcod.event.Event) -> None:
-        if event.type:
-            event_list = getattr(self, f"ev_{event.type.lower()}")
-            for ev in event_list:
-                ev(event)
+        tcod.console_set_custom_font(font, flags)
+        self.console = tcod.console_init_root(width, height, title)
+        self.console.bg_color = bg_color
+        self.console.fg_color = fg_color
+        self.console.clear()
 
+        self.title = title
+        self.mouse_focused_offspring = tcp_event.MouseFocus([], [], [])
+        self.kbd_focused_offspring = None
 
-class Tooltip(Canvas, IUpdatable):
-    def __init__(self, value: str = "", x: int = 0, y: int = 0,
-                 fg_color: tcod.Color = tcod.white,
-                 bg_color: tcod.Color = tcod.black,
-                 fg_alpha: float = 1, bg_alpha: float = 0.7,
-                 max_width: int = -1, max_height: int = -1,
-                 delay:float = 0., fade_duration :float = 0.) -> None:
-        super().__init__()
-        self._value = value
-        self.fg_color = fg_color
-        self.bg_color = bg_color
-        self.fg_alpha = fg_alpha
-        self.bg_alpha = bg_alpha
-        self.max_width = max_width
-        self.max_height = max_height
-        self._delay = delay
-        self._fade_duration = fade_duration
-        self._last_time = 0
+    def update_mouse_focused(self, event: tcod.event.MouseMotion) -> None:
+        if not event.state:
+            super().update_mouse_focused(event)
+            self.mouse_focused_offspring = self.get_mouse_focused()
 
-        self._should_update = False
+            ev_mousefocuslost = tcp_event.MouseFocusChange(
+                event, "MOUSEFOCUSLOST")
+            for c in self.mouse_focused_offspring.focus_lost:
+                c.focus_dispatcher.dispatch(ev_mousefocuslost)
+            ev_mousefocusgain = tcp_event.MouseFocusChange(
+                event, "MOUSEFOCUSGAIN")
+            for c in self.mouse_focused_offspring.focus_gain:
+                c.focus_dispatcher.dispatch(ev_mousefocusgain)
 
-    @property
-    def value(self) -> str:
-        return self._value
+    def update_kbd_focus(self) -> bool:
+        focusable_childs = self.get_kbd_focusable()
+        old_i,new_i=tcp_event.KeyboardFocusAdmin.update_focus(focusable_childs)
+        if new_i != old_i:
+            if old_i != -1 :
+                lost = self.kbd_focused_offspring
+                ev_keyboardfocuslost = tcp_event.KeyboardFocusChange(
+                    "KEYBOARDFOCUSLOST")
+                lost.focus_dispatcher.dispatch(ev_keyboardfocuslost)
+            if new_i != -1 :
+                gain = focusable_childs[new_i]
+                ev_keyboardfocusgain = tcp_event.KeyboardFocusChange(
+                    "KEYBOARDFOCUSGAIN")
+                gain.focus_dispatcher.dispatch(ev_keyboardfocusgain)
+                self.kbd_focused_offspring = gain
+            return True
+        return False
 
-    @value.setter
-    def value(self, val) -> None:
-        self._last_time = time.perf_counter()
-        self._value = val
+    def cycle_fwd_kbd_focus(self) ->bool:
+        focusable_childs = self.get_kbd_focusable()
+        next_ind = tcp_event.KeyboardFocusAdmin.next(focusable_childs)
+        has_changed = self.update_kbd_focus()
+        return has_changed
 
-    @property
-    def should_update(self) -> bool:
-        return self._should_update
+    def cycle_bkwd_kbd_focus(self) ->bool:
+        focusable_childs = self.get_kbd_focusable()
+        prev_ind = tcp_event.KeyboardFocusAdmin.previous(focusable_childs)
+        has_changed = self.update_kbd_focus()
+        return has_changed
 
-    @should_update.setter
-    def should_update(self, value: bool) -> None:
-        self._should_update = value
-
-    def update_geometry(self, dest: Canvas) -> bool:
-        up = super().update_geometry(dest)
-        if up:
-            self.should_update = True
-        return up
-
-    def update(self) -> None:
-        if len(self.value) > 0:
-            dt = time.perf_counter() - self._last_time
-            if dt < self._delay:
-                pass
-            elif dt > (self._delay + self._fade_duration + 0.5) :
-                self.should_update = False
-            else :
-                lines = []
-                width = height = 0
-                if self.max_width > 0:
-                    lines = textwrap.wrap(self.value, self.max_width)
-                    width = min(self.max_width, max(len(L) for L in lines))
-                    lines = [" "*((width-len(e)-1)//2) +
-                             e for e in lines]
-                else:
-                    lines = [self.value]
-                    width = len(self.value)
-                if self.max_height > 0:
-                    lines = lines[:self.max_height]
-                    height = min(self.max_height, len(lines))
-                else:
-                    height = len(lines)
-                width += 2
-                height += 2
-
-                self.console = tcod.console_new(width, height)
-                self.console.bg[:] = self.bg_color
-                self.console.fg[:] = self.fg_color
-                self.console.ch[[0, -1], :] = 196
-                self.console.ch[:, [0, -1]] = 179
-                self.console.ch[[[0, -1], [-1, 0]],
-                                [0, -1]] = [[218, 217], [192, 191]]
-
-                for i, e in enumerate(lines):
-                    self.console.print_(1, i+1, e)
-
-    def draw(self, dest: Canvas) -> None:
-        if len(self.value) > 0:
-            if self.x + self.console.width > dest.console.width:
-                self.x = self.x - 1 - self.console.width
-
-            dt = time.perf_counter() - self._last_time
-            fade = 1
-            if self._fade_duration > 0:
-                fade = (dt - self._delay) / self._fade_duration
-            if dt > self._delay:
-                if fade > 1:
-                    fade = 1
-                self.console.blit(dest.console, self.x+1, self.y,
-                                  fg_alpha=self.fg_alpha * fade,
-                                  bg_alpha=self.bg_alpha * fade)
-
-
-class MouseFocusChange:
-    def __init__(self, event: tcod.event.MouseMotion, type_: str):
-        if type_ not in ["MOUSEFOCUSGAIN", "MOUSEFOCUSLOST"]:
-            raise ValueError("type_ must be MOUSEFOCUSGAIN or MOUSEFOCUSLOST")
-        self.type = type_
-        self.sdl_event = event.sdl_event
-        self.pixel = event.pixel
-        self.pixel_motion = event.pixel_motion
-        self.tile = event.tile
-        self.tile_motion = event.tile_motion
-        self.state = event.state

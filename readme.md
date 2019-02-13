@@ -22,18 +22,15 @@ Using the map used in problem 2, implement :
 #### CHALLENGE 5 : ASCII map combined
 
 Combine challenge 2 and 4 in only one, making it as clean as possible.
+Add a fading for the tooltip when hovering over a country. The tooltip must then appear after a fixed time without moving the mouse.
 
-#### Challenge 6 : Combine challenge 3,4,5
-
-Combine challenge 3,4,5 so that there is a fading for the tooltip when hovering over a country. The tooltip must then appear after a fixed time without moving the mouse.
-
-#### Challenge 7 : Input box and button
+#### Challenge 6 : Input box and button
 
 Create an input box where you can type whatever you want and store the value.
 Create a button that change style when it gain focus.
 Both widget can be focused with the mouse or the keyboard
 
-#### Challenge 8 : ASCII graph viewer
+#### Challenge 7 : ASCII graph viewer
 
 Make a graph viewer in ASCII so that you can input a function and see the resulting graph. It should be possible to use some special function(sin,cos,log,etc.)
 Being able to zoom and drag around on the graph is a bonus.

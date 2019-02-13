@@ -1,9 +1,11 @@
 import numpy as np
 import tcod
 import tcod.event
-import textwrap
 from typing import Union
-import tcodplus as tcp
+import tcodplus.canvas as canvas
+import tcodplus.widgets as widgets
+import tcodplus.event as tcp_event
+import tcodplus.interfaces as interfaces
 
 COUNTRY_COLOR = {
     (236, 200, 77): "W. Europe",
@@ -15,7 +17,8 @@ COUNTRY_COLOR = {
 COLOR_RANGE = 10
 
 
-class ImageMap(tcp.Canvas, tcp.IFocusable, tcp.IUpdatable):
+class ImageMap(canvas.Canvas, interfaces.IMouseFocusable,
+        interfaces.IUpdatable):
     def __init__(self, path: str, x: Union[int, float] = 0,
                  y: Union[int, float] = 0, width: Union[int, float] = 1.,
                  height: Union[int, float] = 1., off_x: int = 0, off_y: int = 0,
@@ -31,7 +34,7 @@ class ImageMap(tcp.Canvas, tcp.IFocusable, tcp.IUpdatable):
         self.blend = blend
         self.console = None
 
-        self._mouse_dispatcher = tcp.CanvasDispatcher()
+        self._mouse_dispatcher = tcp_event.CanvasDispatcher()
         self._mouse_dispatcher.ev_mousewheel += [self._ev_mousewheel]
         self._mouse_dispatcher.ev_mousemotion += [self._ev_mousemotion]
 
@@ -74,7 +77,7 @@ class ImageMap(tcp.Canvas, tcp.IFocusable, tcp.IUpdatable):
         if abs(self._off_y) >= h:
             self._off_y = (self._off_y//abs(self._off_y)) * h
 
-    def isfocused(self, event: tcod.event.MouseMotion) -> bool:
+    def ismousefocused(self, event: tcod.event.MouseMotion) -> bool:
         mcx, mcy = event.tile
         abs_x, abs_y, _, _, width, height = self.geometry
         m_rel_x = mcx - abs_x
@@ -84,7 +87,7 @@ class ImageMap(tcp.Canvas, tcp.IFocusable, tcp.IUpdatable):
         return is_in_x and is_in_y
 
     @property
-    def focus_dispatcher(self) -> tcp.CanvasDispatcher:
+    def focus_dispatcher(self) -> tcp_event.CanvasDispatcher:
         return self._mouse_dispatcher
 
     def _ev_mousewheel(self, event: tcod.event.MouseWheel) -> None:
@@ -117,7 +120,7 @@ class ImageMap(tcp.Canvas, tcp.IFocusable, tcp.IUpdatable):
             self.off_y += dcy
         self.should_update = True
 
-    def update_geometry(self, dest: tcp.Canvas) -> bool:
+    def update_geometry(self, dest: canvas.Canvas) -> bool:
         up = super().update_geometry(dest)
 
         width, height = self.geometry.width, self.geometry.height
@@ -135,13 +138,10 @@ class ImageMap(tcp.Canvas, tcp.IFocusable, tcp.IUpdatable):
         # map blitting
         img_x = self.geometry.width // 2 + self.off_x
         img_y = self.geometry.height // 2 + self.off_y
-        self.img.blit(self.console, img_x, img_y, tcod.BKGND_SET,
+        self.img.blit(self.console, img_x, img_y, self.blend,
                       self.scale, self.scale, self.angle)
 
         self.should_update = False
-
-    def draw(self, dest: tcp.Canvas) -> None:
-        self.console.blit(dest.console, self.geometry.x, self.geometry.y)
 
 
 def init_root(w: int, h: int, title: str) -> tcod.console.Console:
@@ -151,7 +151,7 @@ def init_root(w: int, h: int, title: str) -> tcod.console.Console:
     return tcod.console_init_root(w, h, title)
 
 
-def handle_events(canvas: tcp.Canvas) -> None:
+def handle_events(canvas: canvas.Canvas) -> None:
     for event in tcod.event.get():
         if event.type == "KEYDOWN" and event.sym == tcod.event.K_ESCAPE:
             raise SystemExit()
@@ -160,14 +160,14 @@ def handle_events(canvas: tcp.Canvas) -> None:
 
         if event.type in ("MOUSEMOTION", "MOUSEBUTTONDOWN",
                           "MOUSEBUTTONUP", "MOUSEWHEEL"):
-            for c in canvas.focused_childs:
+            for c in canvas.get_mouse_focused().focused:
                 c.focus_dispatcher.dispatch(event)
         # canvas.unfocused_events(event)
 
 
-def map_tooltip_event(img_map: ImageMap, tooltip: tcp.Tooltip,
+def map_tooltip_event(img_map: ImageMap, tooltip: widgets.Tooltip,
                       event: tcod.event.MouseMotion) -> None:
-    if event.type in ["MOUSEMOTION","MOUSEFOCUSGAIN"] and not event.state:
+    if event.type in ["MOUSEMOTION", "MOUSEFOCUSGAIN"] and not event.state:
         mcx, mcy = event.tile
         m_rel_x = mcx - img_map.geometry.abs_x
         m_rel_y = mcy - img_map.geometry.abs_y
@@ -183,16 +183,17 @@ def map_tooltip_event(img_map: ImageMap, tooltip: tcp.Tooltip,
         tooltip.y = mcy
         tooltip.value = country
         tooltip.should_update = True
-    else: # MOUSEFOCUSELOST
+    else:  # MOUSEFOCUSELOST
         tooltip.should_update = False
         tooltip.value = ""
 
 
 def main() -> None:
     width = height = 70
-    root_console = init_root(width, height,
-                             "Challenge 5: Cleaner Zoom, drag and tooltip")
-    root_canvas = tcp.Canvas(console=root_console)
+    font = "data/fonts/dejavu10x10_gs_tc.png"
+    root_canvas = canvas.RootCanvas(width, height,
+                                 "Challenge 5: Cleaner Zoom, drag and tooltip",
+                                 font)
 
     img_path = "data/img/map-of-europe-clipart.bmp"
     europa_map = ImageMap(img_path, 0, 0, .51, .51)
@@ -203,7 +204,7 @@ def main() -> None:
     img_path = "data/img/mountain.bmp"
     mountain_img = ImageMap(img_path, 0, .50, .51, .51)
 
-    tooltip = tcp.Tooltip(max_width=10,delay=0.3,fade_duration=0.3)
+    tooltip = widgets.Tooltip(max_width=10, delay=0.3, fade_duration=0.3)
 
     europa_map.focus_dispatcher.ev_mousemotion += [
         lambda ev: map_tooltip_event(europa_map, tooltip, ev)]
@@ -217,10 +218,7 @@ def main() -> None:
         lambda ev: print("focus lost")]
 
     #root_canvas.childs += map_canvas
-    root_canvas.childs += [europa_map]
-    root_canvas.childs += [iss_img]
-    root_canvas.childs += [mountain_img]
-    root_canvas.childs += [tooltip]
+    root_canvas.childs += [europa_map, iss_img, mountain_img, tooltip]
 
     tcod.sys_set_fps(60)
     while not tcod.console_is_window_closed():
