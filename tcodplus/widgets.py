@@ -92,16 +92,19 @@ class Tooltip(BaseUpdatable):
                  fg_alpha: float = 1, bg_alpha: float = 0.7,
                  max_width: int = -1, max_height: int = -1,
                  delay: float = 0., fade_duration: float = 0.,
-                 *args, **kwargs) -> None:
+                 has_border: bool = True, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._value = value
         self.fg_alpha = fg_alpha
         self.bg_alpha = bg_alpha
         self.max_width = max_width
         self.max_height = max_height
+        self.has_border = has_border
         self._delay = delay
         self._fade_duration = fade_duration
         self._last_time = 0
+
+        self.should_update = False
 
     @property
     def value(self) -> str:
@@ -109,14 +112,12 @@ class Tooltip(BaseUpdatable):
 
     @value.setter
     def value(self, val) -> None:
-        self._last_time = time.perf_counter()
-        self._value = val
-
-    def update_geometry(self, dest: canvas.Canvas) -> bool:
-        up = super().update_geometry(dest)
-        if up:
+        if val != "":
+            self._last_time = time.perf_counter()
             self.should_update = True
-        return up
+        else:
+            self.should_update = False
+        self._value = val
 
     def update(self) -> None:
         if len(self.value) > 0:
@@ -128,11 +129,15 @@ class Tooltip(BaseUpdatable):
             else:
                 lines = []
                 width = height = 0
+
                 if self.max_width > 0:
-                    lines = textwrap.wrap(self.value, self.max_width)
-                    width = min(self.max_width, max(len(L) for L in lines))
-                    lines = [" "*((width-len(e)-1)//2) +
-                             e for e in lines]
+                    tw = textwrap.TextWrapper(width=self.max_width,
+                                              drop_whitespace=False,
+                                              replace_whitespace=False)
+                    lines = self.value.splitlines(keepends=True)
+                    lines = [wp.replace('\n', '') for L in lines
+                             for wp in tw.wrap(L)]
+                    width = max(len(L) for L in lines)
                 else:
                     lines = [self.value]
                     width = len(self.value)
@@ -141,24 +146,31 @@ class Tooltip(BaseUpdatable):
                     height = min(self.max_height, len(lines))
                 else:
                     height = len(lines)
-                width += 2
-                height += 2
 
-                self.console = self.init_console(width, height)
-                self.console.bg[:] = self.bg_color
-                self.console.fg[:] = self.fg_color
-                self.console.ch[[0, -1], :] = 196
-                self.console.ch[:, [0, -1]] = 179
-                self.console.ch[[[0, -1], [-1, 0]],
-                                [0, -1]] = [[218, 217], [192, 191]]
+                # width = min(max_width,len(self.value))
+                # height = self.console.get_height_rect()
+
+                if self.has_border:
+                    width += 2
+                    height += 2
+
+                    self.console = self.init_console(width, height)
+                    self.console.ch[[0, -1], :] = 196
+                    self.console.ch[:, [0, -1]] = 179
+                    self.console.ch[[[0, -1], [-1, 0]],
+                                    [0, -1]] = [[218, 217], [192, 191]]
+                else:
+                    self.console = self.init_console(width, height)
+                self.width = width
+                self.height = height
 
                 for i, e in enumerate(lines):
-                    self.console.print_(1, i+1, e)
+                    self.console.print(self.has_border, i+self.has_border, e)
 
     def draw(self, dest: canvas.Canvas) -> None:
         if len(self.value) > 0:
-            if self.x + self.console.width > dest.console.width:
-                self.x = self.x - 1 - self.console.width
+            if self.x + self.console.width > dest.geometry.width:
+                self.x = dest.geometry.width - self.console.width
 
             dt = time.perf_counter() - self._last_time
             fade = 1
@@ -167,21 +179,17 @@ class Tooltip(BaseUpdatable):
             if dt > self._delay:
                 if fade > 1:
                     fade = 1
-                self.console.blit(dest.console, self.x+1, self.y,
+                self.console.blit(dest.console, self.x, self.y,
                                   fg_alpha=self.fg_alpha * fade,
                                   bg_alpha=self.bg_alpha * fade)
 
 
 class Button(BoxFocusable, BaseKeyboardFocusable):
+    ''' still EXPERIMENTAL '''
+
     def __init__(self, value: str = "", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._value = value
-
-        self.focus_dispatcher.ev_mousefocusgain += [self._ev_mousefocusgain]
-        self.focus_dispatcher.ev_mousefocuslost += [self._ev_mousefocuslost]
-        self.focus_dispatcher.ev_keyboardfocusgain += [self._ev_keyboardfocusgain]
-        self.focus_dispatcher.ev_keyboardfocuslost += [self._ev_keyboardfocuslost]
-        self.focus_dispatcher.ev_mousebuttonup += [self._ev_mousebuttonup]
 
     @property
     def value(self) -> str:
@@ -189,14 +197,15 @@ class Button(BoxFocusable, BaseKeyboardFocusable):
 
     @value.setter
     def value(self, val: str) -> None:
-        self.should_update = True
         self._value = val
+        self.should_update = True
 
-    def update(self):
+    def update(self) -> None:
         height = 3
         width = 2 + len(self.value)
-        self.console = tcod.console_new(width, height)
 
+        self.width = width
+        self.height = height
         self.console = self.init_console(width, height)
         self.console.bg[:] = self.bg_color
         self.console.fg[:] = self.fg_color
@@ -208,30 +217,8 @@ class Button(BoxFocusable, BaseKeyboardFocusable):
         self.console.fg[:, [0, -1]] = (20, 20, 20)
         self.console.fg[[[0, -1], [-1, 0]],
                         [0, -1]] = (20, 20, 20)
-        self.console.print_(1, 1, self.value)
+        self.console.print(1, 1, self.value, self.fg_color, self.bg_color)
         self.should_update = False
-
-    def _ev_mousefocuslost(self, event: 'event.MouseFocusChange') -> None:
-        self.bg_color = [min(col+20, 255) for col in self.bg_color]
-        self.should_update = True
-
-    def _ev_mousefocusgain(self, event: 'event.MouseFocusChange') -> None:
-        self.bg_color = [max(col-20, 0) for col in self.bg_color]
-        self.should_update = True
-
-    def _ev_mousebuttonup(self, event: tcod.event.MouseButtonEvent):
-        print("You clicked me !")
-
-    def _ev_keyboardfocuslost(self, event: 'event.KeyboardFocusChange') -> None:
-        print("keyboard focus lost")
-        self.bg_color = [min(col+20, 255) for col in self.bg_color]
-        self.should_update = True
-
-    def _ev_keyboardfocusgain(self, event: 'event.KeyboardFocusChange') -> None:
-        print("keyboard focus gain")
-        self.bg_color = [max(col-20, 0) for col in self.bg_color]
-        self.should_update = True
-
 
 
 class InputField(BoxFocusable, BaseKeyboardFocusable):
@@ -258,31 +245,29 @@ class InputField(BoxFocusable, BaseKeyboardFocusable):
         self.should_update = True
         self._value = val
 
-    def update(self):
+    def update(self) -> None:
         height = 1
         width = self.geometry.width
         visible_value = self.value[self._offset:self._offset+width]
-        self.console = tcod.console_new(width, height)
 
         self.console = self.init_console(width, height)
-        self.console.bg[:] = self.bg_color
-        self.console.fg[:] = self.fg_color
-        self.console.print_(0, 0, visible_value)
+        self.console.print(0, 0, visible_value)
         if self.iskeyboardfocused():
             self.console.bg[0, self._pos] = [255-col for col in self.bg_color]
             self.console.fg[0, self._pos] = [255-col for col in self.fg_color]
         self.should_update = False
 
     def _ev_mousefocuslost(self, event: event.MouseFocusChange) -> None:
-        self.bg_color = [min(col+20, 255) for col in self.bg_color]
+        # self.bg_color = [min(col+20, 255) for col in self.bg_color]
+        # Need to find something better here
         self.should_update = True
 
     def _ev_mousefocusgain(self, event: event.MouseFocusChange) -> None:
-        self.bg_color = [max(col-20, 0) for col in self.bg_color]
+        # self.bg_color = [max(col-20, 0) for col in self.bg_color]
+        # Need to find something better here
         self.should_update = True
 
     def _ev_mousebuttondown(self, event: tcod.event.MouseButtonEvent):
-        print("keyboard focus requested")
         self.request_kbd_focus()
         self.should_update = True
 

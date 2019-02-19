@@ -182,10 +182,10 @@ def map_tooltip_event(img_map: ImageMap, tooltip: widgets.Tooltip,
         tooltip.x = mcx
         tooltip.y = mcy
         tooltip.value = country
-        tooltip.should_update = True
+        # tooltip.should_update = True
     else:  # MOUSEFOCUSELOST
-        tooltip.should_update = False
         tooltip.value = ""
+        # tooltip.should_update = False
 
 
 def main() -> None:

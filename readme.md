@@ -34,8 +34,7 @@ Both widget can be focused with the mouse or the keyboard
 
 Make a graph viewer in ASCII so that you can input a function and see the resulting graph. It should be possible to use some special function(sin,cos,log,etc.)
 Being able to zoom and drag around on the graph is a bonus.
-The function to draw is given as a string via the command line.
 
-#### Challenge 9 : Editable ASCII graph
+#### Challenge 8 : Editable ASCII graph
 
-Combine challenge 8 and 9 to have an editable ASCII graph, meaning that you can input a function via an input box and render the resulting graph immediately
+Combine challenge 6 and 7 to have an editable ASCII graph, meaning that you can input a function via an input box and render the resulting graph immediately

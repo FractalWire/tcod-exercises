@@ -1,5 +1,5 @@
 import abc
-from typing import Union, List, Dict, Callable, NamedTuple
+from typing import Union, List, Dict, Callable, NamedTuple, Tuple
 import tcod
 import tcod.event
 import time
@@ -20,14 +20,14 @@ def relative_geometry(dest: 'Canvas', rel_x: Union[int, float],
         if dest.geometry == None:
             return Geometry(0, 0, 0, 0, 0, 0)
         d_abs_x, d_abs_y, _, _, d_width, d_height = dest.geometry
-        x = rel_x if isinstance(rel_x, int) else int(rel_x*d_width)
-        y = rel_y if isinstance(rel_y, int) else int(rel_y*d_height)
+        x = rel_x if isinstance(rel_x, int) else round(rel_x*d_width)
+        y = rel_y if isinstance(rel_y, int) else round(rel_y*d_height)
         abs_x = d_abs_x + x
         abs_y = d_abs_y + y
         width = rel_width if isinstance(rel_width, int) \
-            else int(rel_width*d_width)
+            else round(rel_width*d_width)
         height = rel_height if isinstance(rel_height, int) \
-            else int(rel_height*d_height)
+            else round(rel_height*d_height)
 
         return Geometry(abs_x, abs_y, x, y, width, height)
 
@@ -38,9 +38,9 @@ class Canvas(interfaces.IDrawable):
     def __init__(self, x: Union[int, float] = 0, y: Union[int, float] = 0,
                  width: Union[int, float] = 0, height: Union[int, float] = 0,
                  fg_alpha: float = 1, bg_alpha: float = 1,
-                 bg_color: tcod.color.Color = tcod.black,
-                 fg_color: tcod.color.Color = tcod.white,
-                 key_color: tcod.color.Color = None) -> None:
+                 bg_color: Tuple[int, int, int] = tcod.black,
+                 fg_color: Tuple[int, int, int] = tcod.white,
+                 key_color: Tuple[int, int, int] = None) -> None:
         self.x = x
         self.y = y
         self.width = width
@@ -51,11 +51,11 @@ class Canvas(interfaces.IDrawable):
         self._focused_childs = tcp_event.MouseFocus([], [], [])
 
         self.console = None
-        self.bg_color = bg_color
-        self.fg_color = fg_color
+        self.bg_color = tcod.Color(*bg_color)
+        self.fg_color = tcod.Color(*fg_color)
         self.bg_alpha = bg_alpha
         self.fg_alpha = fg_alpha
-        self.key_color = key_color
+        self.key_color = tcod.Color(*key_color) if key_color else None
         self.visible = True
 
     @property
@@ -108,10 +108,8 @@ class Canvas(interfaces.IDrawable):
         return focusable_childs
 
     def init_console(self, width: int, height: int) -> tcod.console.Console:
-        console = tcod.console_new(width, height)
-        console.default_bg = self.bg_color
-        console.default_fg = self.fg_color
-        console.clear()
+        console = tcod.console.Console(width, height)
+        console.clear(bg=self.bg_color, fg=self.fg_color)
         return console
 
     def update_geometry(self, dest: 'Canvas') -> bool:
@@ -135,22 +133,25 @@ class Canvas(interfaces.IDrawable):
     def refresh(self) -> bool:
 
         up = False
+
+        # refresh childs
         for c in self.childs:
-            # update childs geometry
-            up = c.update_geometry(self) or up
-
-            # update childs
+            up_geom = c.update_geometry(self)
             if isinstance(c, interfaces.IUpdatable):
-                if c.should_update:
-                    c.update()
-                    up = True
+                c.should_update = c.should_update or up_geom
+            up = any([c.refresh(), up, up_geom])
 
-            # refresh childs
-            up = c.refresh() or up
-
-        # draw
         if up:
-            self.console.clear()
+            self.console.clear(bg=self.bg_color, fg=self.fg_color)
+
+        # update self if necessary
+        if isinstance(self, interfaces.IUpdatable) \
+                and (self.should_update or up):
+            self.update()
+            up = True
+
+        # draw childs if necessary
+        if up:
             for c in self.childs:
                 if c.visible:
                     c.draw(self)
@@ -184,6 +185,48 @@ class RootCanvas(Canvas):
             super().update_mouse_focused(event)
             self.mouse_focused_offspring = self.get_mouse_focused()
 
+    def update_kbd_focus(self) -> bool:
+        focusable_childs = self.get_kbd_focusable()
+        old_i, new_i = tcp_event.KeyboardFocusAdmin.update_focus(
+            focusable_childs)
+        if new_i != old_i:
+            if old_i != -1:
+                lost = self.kbd_focused_offspring
+                ev_keyboardfocuslost = tcp_event.KeyboardFocusChange(
+                    "KEYBOARDFOCUSLOST")
+                lost.focus_dispatcher.dispatch(ev_keyboardfocuslost)
+            if new_i != -1:
+                gain = focusable_childs[new_i]
+                ev_keyboardfocusgain = tcp_event.KeyboardFocusChange(
+                    "KEYBOARDFOCUSGAIN")
+                gain.focus_dispatcher.dispatch(ev_keyboardfocusgain)
+                self.kbd_focused_offspring = gain
+            return True
+        return False
+
+    def cycle_fwd_kbd_focus(self) -> bool:
+        focusable_childs = self.get_kbd_focusable()
+        next_ind = tcp_event.KeyboardFocusAdmin.next(focusable_childs)
+        has_changed = self.update_kbd_focus()
+        return has_changed
+
+    def cycle_bkwd_kbd_focus(self) -> bool:
+        focusable_childs = self.get_kbd_focusable()
+        prev_ind = tcp_event.KeyboardFocusAdmin.previous(focusable_childs)
+        has_changed = self.update_kbd_focus()
+        return has_changed
+
+    def handle_focus_event(self, event: tcod.event.Event) -> None:
+        kbd_focus_changed = False
+        if event.type == "MOUSEMOTION" and not event.state:
+            self.update_mouse_focused(event)
+        elif event.type == "KEYDOWN":
+            if event.sym == tcod.event.K_TAB:
+                kbd_focus_changed = self.cycle_bkwd_kbd_focus() \
+                    if event.mod & tcod.event.KMOD_SHIFT \
+                    else self.cycle_fwd_kbd_focus()
+
+        if event.type == "MOUSEMOTION":
             ev_mousefocuslost = tcp_event.MouseFocusChange(
                 event, "MOUSEFOCUSLOST")
             for c in self.mouse_focused_offspring.focus_lost:
@@ -193,33 +236,15 @@ class RootCanvas(Canvas):
             for c in self.mouse_focused_offspring.focus_gain:
                 c.focus_dispatcher.dispatch(ev_mousefocusgain)
 
-    def update_kbd_focus(self) -> bool:
-        focusable_childs = self.get_kbd_focusable()
-        old_i,new_i=tcp_event.KeyboardFocusAdmin.update_focus(focusable_childs)
-        if new_i != old_i:
-            if old_i != -1 :
-                lost = self.kbd_focused_offspring
-                ev_keyboardfocuslost = tcp_event.KeyboardFocusChange(
-                    "KEYBOARDFOCUSLOST")
-                lost.focus_dispatcher.dispatch(ev_keyboardfocuslost)
-            if new_i != -1 :
-                gain = focusable_childs[new_i]
-                ev_keyboardfocusgain = tcp_event.KeyboardFocusChange(
-                    "KEYBOARDFOCUSGAIN")
-                gain.focus_dispatcher.dispatch(ev_keyboardfocusgain)
-                self.kbd_focused_offspring = gain
-            return True
-        return False
+        if event.type in ("MOUSEMOTION", "MOUSEBUTTONDOWN",
+                          "MOUSEBUTTONUP", "MOUSEWHEEL"):
+            for c in self.mouse_focused_offspring.focused:
+                if c not in self.mouse_focused_offspring.focus_gain :
+                    c.focus_dispatcher.dispatch(event)
 
-    def cycle_fwd_kbd_focus(self) ->bool:
-        focusable_childs = self.get_kbd_focusable()
-        next_ind = tcp_event.KeyboardFocusAdmin.next(focusable_childs)
-        has_changed = self.update_kbd_focus()
-        return has_changed
-
-    def cycle_bkwd_kbd_focus(self) ->bool:
-        focusable_childs = self.get_kbd_focusable()
-        prev_ind = tcp_event.KeyboardFocusAdmin.previous(focusable_childs)
-        has_changed = self.update_kbd_focus()
-        return has_changed
-
+            self.update_kbd_focus()
+        elif event.type in ("KEYDOWN", "KEYUP", "TEXTINPUT") \
+                and not kbd_focused_offspring:
+            k_focused_offspring = self.kbd_focused_offspring
+            if k_focused_offspring != None:
+                k_focused_offspring.focus_dispatcher.dispatch(event)

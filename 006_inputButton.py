@@ -1,9 +1,7 @@
 import tcod
 import tcod.event
-import numpy as np
 import tcodplus.canvas as canvas
 import tcodplus.widgets as widgets
-from typing import Union
 
 
 def main():
@@ -18,6 +16,7 @@ def main():
         5, height-5, width-10, 5, bg_color=(20, 20, 20))
     input_field = widgets.InputField(1, .5, .45, 3, max_len=10,
                                      bg_color=(200, 200, 200), fg_color=(20, 20, 20))
+    print(input_field.fg_color)
     button_canvas = widgets.Button(
         "MyButton", .5, 1, 10, 3, bg_color=(200, 20, 20))
 

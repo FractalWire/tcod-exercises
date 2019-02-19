@@ -54,3 +54,4 @@ class IUpdatable(abc.ABC):
     @abc.abstractmethod
     def update(self) -> None:
         pass
+
