@@ -1,4 +1,3 @@
-import numpy as np
 import tcod
 import math
 
@@ -36,7 +35,6 @@ def main():
 
         tcod.console_flush()
         handle_key()
-
 
 
 def init_root(w, h, title):

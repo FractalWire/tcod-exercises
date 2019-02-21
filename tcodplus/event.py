@@ -1,63 +1,66 @@
-from typing import List, NamedTuple, Tuple
+from __future__ import annotations
+from typing import List, NamedTuple, Tuple, Dict, TYPE_CHECKING
 import tcod.event
-from tcodplus import interfaces
+
+if TYPE_CHECKING:
+    # from tcodplus.canvas import Canvas
+    from tcodplus.interfaces import IKeyboardFocusable
 
 
 MouseFocus = NamedTuple('MouseFocus',
-                        [('focused', List['Canvas']),
-                         ('focus_lost', List['Canvas']),
-                            ('focus_gain', List['Canvas'])])
+                        [('focused', Dict[str, 'Canvas']),
+                         ('focus_lost', Dict[str, 'Canvas']),
+                         ('focus_gain', Dict[str, 'Canvas'])])
 
 
 class KeyboardFocusAdmin:
     # This class assume at any time there is only one focused element and one
     # requesting focused element, which might not be true...
     @classmethod
-    def update_focus(cls, focusable: List['interfaces.IKeyboardFocusable']) \
-            -> Tuple[int, int]:
-        i_req = cls.request_focus_index(focusable)
+    def update_focus(cls, focusable: List[IKeyboardFocusable]) -> Tuple[int, int]:
+        i_req = cls.focus_requested_index(focusable)
         if i_req != -1:
             i_foc = cls.focus_index(focusable)
             if i_req != i_foc:
-                focusable[i_req].change_kbd_focus(True)
-                if i_foc != -1:
-                    focusable[i_foc].change_kbd_focus(False)
-            return i_foc,i_req
-        return -1,-1
+                focusable[i_req].kbdfocus = True
+                if i_foc is not None:
+                    focusable[i_foc].kbdfocus = False
+            else:
+                focusable[i_req].kbdfocus_requested = False
+            return i_foc, i_req
+        return (-1, -1)
 
     @staticmethod
-    def request_focus_index(focusable: List['interfaces.IKeyboardFocusable']) -> int:
+    def focus_requested_index(focusable: List[IKeyboardFocusable]) -> int:
         for i, kf in enumerate(focusable):
-            if kf.iskeyboardfocus_requested():
+            if kf.kbdfocus_requested:
                 return i
-        else:
-            return -1
+        return -1
 
     @staticmethod
-    def focus_index(focusable: List['interfaces.IKeyboardFocusable']) -> int:
+    def focus_index(focusable: List[IKeyboardFocusable]) -> int:
         for i, kf in enumerate(focusable):
-            if kf.iskeyboardfocused():
+            if kf.kbdfocus:
                 return i
-        else:
-            return -1
+        return -1
 
     @classmethod
-    def next(cls, focusable: List['interfaces.IKeyboardFocusable']) -> int:
-        if len(focusable) > 0:
+    def next(cls, focusable: List[IKeyboardFocusable]) -> int:
+        if focusable:
             i = cls.focus_index(focusable)
             next_i = (i+1) % len(focusable)
-            focusable[next_i].request_kbd_focus()
+            focusable[next_i].kbdfocus_requested = True
             return next_i
         return -1
 
     @classmethod
-    def previous(cls, focusable: List['interfaces.IKeyboardFocusable']) -> int:
-        if len(focusable) > 0:
+    def previous(cls, focusable: List[IKeyboardFocusable]) -> int:
+        if focusable:
             i = cls.focus_index(focusable)
             if i == -1:
                 i = 0
             prev_i = (i-1) % len(focusable)
-            focusable[prev_i].request_kbd_focus()
+            focusable[prev_i].kbdfocus_requested = True
             return prev_i
         return -1
 
@@ -83,6 +86,7 @@ class CanvasDispatcher:
                 ev(event)
 
 
+# Those two classes are UGLY, they should inherit or something !
 class KeyboardFocusChange:
     def __init__(self, type_: str):
         if type_ not in ["KEYBOARDFOCUSLOST", "KEYBOARDFOCUSGAIN"]:

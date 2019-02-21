@@ -1,4 +1,3 @@
-import numpy as np
 import tcod
 import tcod.event
 from typing import Union
@@ -18,7 +17,7 @@ COLOR_RANGE = 10
 
 
 class ImageMap(canvas.Canvas, interfaces.IMouseFocusable,
-        interfaces.IUpdatable):
+               interfaces.IUpdatable):
     def __init__(self, path: str, x: Union[int, float] = 0,
                  y: Union[int, float] = 0, width: Union[int, float] = 1.,
                  height: Union[int, float] = 1., off_x: int = 0, off_y: int = 0,
@@ -77,7 +76,7 @@ class ImageMap(canvas.Canvas, interfaces.IMouseFocusable,
         if abs(self._off_y) >= h:
             self._off_y = (self._off_y//abs(self._off_y)) * h
 
-    def ismousefocused(self, event: tcod.event.MouseMotion) -> bool:
+    def mousefocus(self, event: tcod.event.MouseMotion) -> bool:
         mcx, mcy = event.tile
         abs_x, abs_y, _, _, width, height = self.geometry
         m_rel_x = mcx - abs_x
@@ -104,11 +103,6 @@ class ImageMap(canvas.Canvas, interfaces.IMouseFocusable,
         self.should_update = True
 
     def _ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
-        mcx, mcy = event.tile
-        abs_x, abs_y = self.geometry.abs_x, self.geometry.abs_y
-        m_rel_x = mcx - abs_x
-        m_rel_y = mcy - abs_y
-
         # Drag
         dcx = dcy = 0
         if event.state & tcod.event.BUTTON_LMASK:
@@ -156,11 +150,11 @@ def handle_events(canvas: canvas.Canvas) -> None:
         if event.type == "KEYDOWN" and event.sym == tcod.event.K_ESCAPE:
             raise SystemExit()
         elif event.type == "MOUSEMOTION" and not event.state:
-            canvas.update_mouse_focused(event)
+            canvas._update_mouse_focus(event)
 
         if event.type in ("MOUSEMOTION", "MOUSEBUTTONDOWN",
                           "MOUSEBUTTONUP", "MOUSEWHEEL"):
-            for c in canvas.get_mouse_focused().focused:
+            for c in canvas.mouse_focused_offsprings().focused.values():
                 c.focus_dispatcher.dispatch(event)
         # canvas.unfocused_events(event)
 
@@ -192,8 +186,8 @@ def main() -> None:
     width = height = 70
     font = "data/fonts/dejavu10x10_gs_tc.png"
     root_canvas = canvas.RootCanvas(width, height,
-                                 "Challenge 5: Cleaner Zoom, drag and tooltip",
-                                 font)
+                                    "Challenge 5: Cleaner Zoom, drag and tooltip",
+                                    font)
 
     img_path = "data/img/map-of-europe-clipart.bmp"
     europa_map = ImageMap(img_path, 0, 0, .51, .51)
@@ -217,8 +211,8 @@ def main() -> None:
     europa_map.focus_dispatcher.ev_mousefocuslost += [
         lambda ev: print("focus lost")]
 
-    #root_canvas.childs += map_canvas
-    root_canvas.childs += [europa_map, iss_img, mountain_img, tooltip]
+    # root_canvas.childs += map_canvas
+    root_canvas.add_childs(europa_map, iss_img, mountain_img, tooltip)
 
     tcod.sys_set_fps(60)
     while not tcod.console_is_window_closed():

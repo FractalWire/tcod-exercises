@@ -1,16 +1,17 @@
-import tcod.event
+from __future__ import annotations
 import time
 import textwrap
-from tcodplus import canvas
-from tcodplus import interfaces
-from tcodplus import event
+import tcod.event
+from tcodplus.canvas import Canvas
+from tcodplus import event as tcp_event
+from tcodplus.interfaces import IUpdatable, IFocusable, IMouseFocusable, IKeyboardFocusable
 
 
 ################
 # BASE WIDGETS #
 ################
 
-class BaseUpdatable(canvas.Canvas, interfaces.IUpdatable):
+class BaseUpdatable(Canvas, IUpdatable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._should_update = True
@@ -24,21 +25,18 @@ class BaseUpdatable(canvas.Canvas, interfaces.IUpdatable):
         self._should_update = value
 
 
-class BaseFocusable(BaseUpdatable, interfaces.IFocusable):
+class BaseFocusable(BaseUpdatable, IFocusable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._focus_dispatcher = event.CanvasDispatcher()
+        self._focus_dispatcher = tcp_event.CanvasDispatcher()
 
     @property
     def focus_dispatcher(self):
         return self._focus_dispatcher
 
 
-class BoxFocusable(BaseFocusable, interfaces.IMouseFocusable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def ismousefocused(self, event: tcod.event.MouseMotion) -> bool:
+class BoxFocusable(BaseFocusable, IMouseFocusable):
+    def mousefocus(self, event: tcod.event.MouseMotion) -> bool:
         mcx, mcy = event.tile
         abs_x, abs_y, _, _, width, height = self.geometry
         m_rel_x = mcx - abs_x
@@ -48,11 +46,8 @@ class BoxFocusable(BaseFocusable, interfaces.IMouseFocusable):
         return is_in_x and is_in_y
 
 
-class KeyColorFocusable(BaseFocusable, interfaces.IMouseFocusable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def ismousefocused(self, event: tcod.event.MouseMotion) -> bool:
+class KeyColorFocusable(BaseFocusable, IMouseFocusable):
+    def mousefocus(self, event: tcod.event.MouseMotion) -> bool:
         mcx, mcy = event.tile
         abs_x, abs_y = self.geometry[:3]
         m_rel_x = mcx - abs_x
@@ -61,26 +56,30 @@ class KeyColorFocusable(BaseFocusable, interfaces.IMouseFocusable):
         return self.console.bg[m_rel_y, m_rel_x] != self.key_color
 
 
-class BaseKeyboardFocusable(BaseFocusable, interfaces.IKeyboardFocusable):
+class BaseKeyboardFocusable(BaseFocusable, IKeyboardFocusable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._kbd_focused = False
-        self._request_kbd_focus = False
+        self._kbdfocus = False
+        self._kbdfocus_requested = False
 
-    def iskeyboardfocused(self) -> bool:
-        return self._kbd_focused
+    @property
+    def kbdfocus(self) -> bool:
+        return self._kbdfocus
 
-    def change_kbd_focus(self, val: bool) -> None:
-        self._request_kbd_focus = False
-        if self.iskeyboardfocused != val:
+    @kbdfocus.setter
+    def kbdfocus(self, val: bool) -> None:
+        self.kbdfocus_requested = False
+        if self.kbdfocus != val:
             self.should_update = True
-        self._kbd_focused = val
+        self._kbdfocus = val
 
-    def iskeyboardfocus_requested(self) -> bool:
-        return self._request_kbd_focus
+    @property
+    def kbdfocus_requested(self) -> bool:
+        return self._kbdfocus_requested
 
-    def request_kbd_focus(self) -> None:
-        self._request_kbd_focus = True
+    @kbdfocus_requested.setter
+    def kbdfocus_requested(self, val: bool) -> None:
+        self._kbdfocus_requested = val
 
 ####################
 # CONCRETE WIDGETS #
@@ -120,7 +119,7 @@ class Tooltip(BaseUpdatable):
         self._value = val
 
     def update(self) -> None:
-        if len(self.value) > 0:
+        if self.value:
             dt = time.perf_counter() - self._last_time
             if dt < self._delay:
                 pass
@@ -167,7 +166,7 @@ class Tooltip(BaseUpdatable):
                 for i, e in enumerate(lines):
                     self.console.print(self.has_border, i+self.has_border, e)
 
-    def draw(self, dest: canvas.Canvas) -> None:
+    def draw(self, dest: Canvas) -> None:
         if len(self.value) > 0:
             if self.x + self.console.width > dest.geometry.width:
                 self.x = dest.geometry.width - self.console.width
@@ -252,23 +251,23 @@ class InputField(BoxFocusable, BaseKeyboardFocusable):
 
         self.console = self.init_console(width, height)
         self.console.print(0, 0, visible_value)
-        if self.iskeyboardfocused():
+        if self.kbdfocus:
             self.console.bg[0, self._pos] = [255-col for col in self.bg_color]
             self.console.fg[0, self._pos] = [255-col for col in self.fg_color]
         self.should_update = False
 
-    def _ev_mousefocuslost(self, event: event.MouseFocusChange) -> None:
+    def _ev_mousefocuslost(self, event: tcp_event.MouseFocusChange) -> None:
         # self.bg_color = [min(col+20, 255) for col in self.bg_color]
         # Need to find something better here
         self.should_update = True
 
-    def _ev_mousefocusgain(self, event: event.MouseFocusChange) -> None:
+    def _ev_mousefocusgain(self, event: tcp_event.MouseFocusChange) -> None:
         # self.bg_color = [max(col-20, 0) for col in self.bg_color]
         # Need to find something better here
         self.should_update = True
 
     def _ev_mousebuttondown(self, event: tcod.event.MouseButtonEvent):
-        self.request_kbd_focus()
+        self.kbdfocus_requested = True
         self.should_update = True
 
     def _ev_keydown(self, event: tcod.event.KeyboardEvent) -> None:
@@ -295,7 +294,7 @@ class InputField(BoxFocusable, BaseKeyboardFocusable):
             self._offset = 0
             self._pos = 0
         elif event.sym == tcod.event.K_BACKSPACE:
-            if not (self._pos == self._offset == 0):
+            if not self._pos == self._offset == 0:
                 val = self.value
                 ind = self._pos + self._offset
                 self.value = val[:ind-1]+val[ind:]

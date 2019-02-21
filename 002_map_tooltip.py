@@ -1,4 +1,3 @@
-import numpy as np
 import tcod
 
 country_color = {
@@ -52,7 +51,7 @@ def add_label(dest, x, y, country_name):
         # label.ch[:] = ord("#")
         label.ch[[0, -1], :] = 196
         label.ch[:, [0, -1]] = 179
-        label.ch[[[0, -1], [-1, 0]], [0, -1]] = [[218,217],[192,191]]
+        label.ch[[[0, -1], [-1, 0]], [0, -1]] = [[218, 217], [192, 191]]
 
         label.print_(1, 1, label_text)
         label.blit(dest, x, y, 0, 0, label_width, label_height, 1, 0.7)

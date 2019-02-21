@@ -1,13 +1,11 @@
+import sys
+import random
+from typing import Tuple, Callable, Union
 import tcod
 import tcod.event
+import sympy as sy
 import tcodplus.canvas as canvas
 import tcodplus.widgets as widgets
-import random
-from typing import Tuple, Callable, NamedTuple, Union
-import sympy as sy
-import numpy as np
-import sys
-import traceback
 
 
 def main():
@@ -28,7 +26,7 @@ def main():
     gd.viewer.funs.update({gf1.name: gf1, gf2.name: gf2,
                            gf3.name: gf3})
 
-    root_canvas.childs += [gd]
+    root_canvas.add_childs(gd)
 
     tcod.sys_set_fps(60)
     while not tcod.console_is_window_closed():
@@ -67,8 +65,8 @@ class GraphDisplay(canvas.Canvas):
                                             delay=0.3, fade_duration=0.3,
                                             max_width=20)
 
-        self.childs += [self.viewer, self.tooltip, self.help,
-                        self.info_tooltip]
+        self.add_childs(self.viewer, self.tooltip, self.help,
+                        self.info_tooltip)
 
         def viewer_tooltip_event(event: tcod.event.MouseMotion) -> None:
             viewer = self.viewer
@@ -133,7 +131,7 @@ class GraphFunction:
                              f"Don't try to divide by zero, you scoundrel !")
         else:
             self.expr = expr
-        self.color = color if color != None \
+        self.color = color if color is not None \
             else tuple(random.randrange(150) for _ in range(3))
         self.symbol = symbol
         self.title = title
@@ -204,8 +202,6 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
 
             # drawing the axis step
             step = self.axis_step
-            zoom = f"{2**self.camera.zoom_x:g}"
-            x_precision = 0 if "." not in zoom else len(zoom.split(".")[1])
             for i in range((width//2) % step, width, step):
                 x = itox(i)
                 x = f"{x:g}"
@@ -216,8 +212,6 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
                                                               for c in x]
                     self.console.fg[j_axis, i0:i0+x_width] = self.axis_color
 
-            zoom = f"{2**self.camera.zoom_y:g}"
-            y_precision = 0 if "." not in zoom else len(zoom.split(".")[1])
             for j in range((height//2) % step, height, step):
                 y = jtoy(j)
                 y = f"{y:g}"
@@ -330,11 +324,11 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
                 self.camera.y += dcy*2**self.camera.zoom_y
             if dcx or dcy:
                 self.should_update = True
-        else: # Tile focus
+        else:  # Tile focus
             if event.type == 'MOUSEFOCUSGAIN':
-                self.console.bg[m_rel_y, m_rel_x] = (200,200,0)
-                if not self.iskeyboardfocused():
-                    self.request_kbd_focus()
+                self.console.bg[m_rel_y, m_rel_x] = (200, 200, 0)
+                if not self.kbdfocus:
+                    self.kbdfocus_requested = True
             elif event.type == 'MOUSEFOCUSLOST':
                 dcx, dcy = event.tile_motion
                 if 0 <= m_rel_x-dcx < self.geometry.width \
@@ -343,7 +337,7 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
             elif event.type == 'MOUSEMOTION':
                 dcx, dcy = event.tile_motion
                 if dcx or dcy:
-                    self.console.bg[m_rel_y, m_rel_x] = (200,200,0)
+                    self.console.bg[m_rel_y, m_rel_x] = (200, 200, 0)
                     self.console.bg[m_rel_y-dcy, m_rel_x-dcx] = self.bg_color
 
     def _ev_mousewheel(self, event: tcod.event.MouseWheel) -> None:

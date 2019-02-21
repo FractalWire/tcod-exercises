@@ -1,42 +1,51 @@
-import tcod.event
-from tcodplus import event
-from tcodplus import canvas
+from __future__ import annotations
+from typing import TYPE_CHECKING
 import abc
+import tcod.event
+
+if TYPE_CHECKING:
+    from tcodplus.canvas import Canvas
+    from tcodplus.event import CanvasDispatcher
 
 
 class IDrawable(abc.ABC):
     @abc.abstractmethod
-    def draw(self, dest: 'canvas.Canvas') -> None:
+    def draw(self, dest: Canvas) -> None:
         pass
+
 
 class IFocusable(abc.ABC):
     @property
     @abc.abstractmethod
-    def focus_dispatcher(self) -> 'event.CanvasDispatcher':
+    def focus_dispatcher(self) -> CanvasDispatcher:
         pass
 
 
 class IMouseFocusable(IFocusable):
     @abc.abstractmethod
-    def ismousefocused(self, event: tcod.event.MouseMotion) -> bool:
+    def mousefocus(self, event: tcod.event.MouseMotion) -> bool:
         pass
 
 
 class IKeyboardFocusable(IFocusable):
+    @property
     @abc.abstractmethod
-    def iskeyboardfocused(self) -> bool:
+    def kbdfocus(self) -> bool:
         pass
 
+    @kbdfocus.setter
     @abc.abstractmethod
-    def iskeyboardfocus_requested(self) -> bool:
+    def kbdfocus(self, val: bool) -> None:
         pass
 
+    @property
     @abc.abstractmethod
-    def request_kbd_focus(self) -> None:
+    def kbdfocus_requested(self) -> bool:
         pass
 
+    @kbdfocus_requested.setter
     @abc.abstractmethod
-    def change_kbd_focus(self, value) -> None:
+    def kbdfocus_requested(self, val: bool) -> None:
         pass
 
 
@@ -54,4 +63,3 @@ class IUpdatable(abc.ABC):
     @abc.abstractmethod
     def update(self) -> None:
         pass
-
