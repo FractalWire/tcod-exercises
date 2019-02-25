@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, NamedTuple, Tuple, Dict, TYPE_CHECKING
+from typing import List, NamedTuple, Tuple, Dict, Callable, TYPE_CHECKING
 import tcod.event
 
 if TYPE_CHECKING:
@@ -67,17 +67,18 @@ class KeyboardFocusAdmin:
 
 class CanvasDispatcher:
     def __init__(self) -> None:
-        self.ev_keydown = []
-        self.ev_keyup = []
-        self.ev_mousemotion = []
-        self.ev_mousebuttondown = []
-        self.ev_mousebuttonup = []
-        self.ev_mousewheel = []
-        self.ev_textinput = []
-        self.ev_mousefocuslost = []
-        self.ev_mousefocusgain = []
-        self.ev_keyboardfocuslost = []
-        self.ev_keyboardfocusgain = []
+        event_funs = List[Callable[[tcod.event.Event], None]]
+        self.ev_keydown: event_funs = []
+        self.ev_keyup: event_funs = []
+        self.ev_mousemotion: event_funs = []
+        self.ev_mousebuttondown: event_funs = []
+        self.ev_mousebuttonup: event_funs = []
+        self.ev_mousewheel: event_funs = []
+        self.ev_textinput: event_funs = []
+        self.ev_mousefocuslost: event_funs = []
+        self.ev_mousefocusgain: event_funs = []
+        self.ev_keyboardfocuslost: event_funs = []
+        self.ev_keyboardfocusgain: event_funs = []
 
     def dispatch(self, event: tcod.event.Event) -> None:
         if event.type:
@@ -85,8 +86,15 @@ class CanvasDispatcher:
             for ev in event_list:
                 ev(event)
 
+    def add_events(self, event_funs: List[Callable[[tcod.event.Event], None]],
+                   event_types: List[str]) -> None:
+        for type_ in event_types:
+            event_list = getattr(self, f"ev_{type_.lower()}")
+            event_list += event_funs
 
 # Those two classes are UGLY, they should inherit or something !
+
+
 class KeyboardFocusChange:
     def __init__(self, type_: str):
         if type_ not in ["KEYBOARDFOCUSLOST", "KEYBOARDFOCUSGAIN"]:

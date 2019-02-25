@@ -1,11 +1,12 @@
 import sys
 import random
-from typing import Tuple, Callable, Union
+from typing import Tuple, Union, Any
 import tcod
 import tcod.event
 import sympy as sy
 import tcodplus.canvas as canvas
 import tcodplus.widgets as widgets
+import tcodplus.style as tcp_style
 
 
 def main():
@@ -17,16 +18,17 @@ def main():
                                     font, flags,
                                     bg_color=(20, 20, 20))
 
-    gd = GraphDisplay(.05, .05, .9, .9,
-                      bg_color=(220, 220, 220), fg_color=(190, 190, 190))
+    style = tcp_style.Style(x=.05, y=.05, width=.9, height=.9,
+                            bg_color=(220, 220, 220), fg_color=(190, 190, 190))
+    gd = GraphDisplay(style=style)
     gf1 = GraphFunction("f", "-100/x")
     gf2 = GraphFunction("g", "exp(x)", symbol="@")
     gf3 = GraphFunction("h", "log(x)", symbol="$")
     # gf4 = GraphFunction("i", "tan(3*x)", symbol="o")
-    gd.viewer.funs.update({gf1.name: gf1, gf2.name: gf2,
-                           gf3.name: gf3})
+    gd.childs["viewer"].funs.update({gf1.name: gf1, gf2.name: gf2,
+                                     gf3.name: gf3})
 
-    root_canvas.add_childs(gd)
+    root_canvas.childs.add(gd)
 
     tcod.sys_set_fps(60)
     while not tcod.console_is_window_closed():
@@ -46,50 +48,33 @@ class GraphDisplay(canvas.Canvas):
     def __init__(self, *args, title="", **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.viewer = GraphViewer(0, 0, 1., 1., title=title,
-                                  bg_color=self.bg_color,
-                                  fg_color=self.fg_color)
+        # style declaration
+        viewer_style = tcp_style.Style(x=0, y=0, width=1., height=1.,
+                                       bg_color=self.style.bg_color,
+                                       fg_color=self.style.fg_color)
 
-        fg_tooltip = tcod.Color(255, 255, 255)-self.bg_color
-        self.tooltip = widgets.Tooltip(bg_alpha=.0,
-                                       fg_color=fg_tooltip,
-                                       delay=0, fade_duration=0,
-                                       has_border=False)
+        fg_coords = tcod.Color(255, 255, 255)-self.style.bg_color
+        coords_style = tcp_style.Style(bg_alpha=0., fg_color=fg_coords)
 
-        bg_help = tcod.Color(255, 255, 255)-self.fg_color+(128, 128, 0)
-        fg_help = tcod.Color(255, 255, 255)-self.bg_color
-        self.help = widgets.Button("?", .94, .02, bg_alpha=0.5, fg_alpha=0.75,
-                                   bg_color=bg_help, fg_color=fg_help)
-        self.info_tooltip = widgets.Tooltip(bg_color=bg_help,
-                                            fg_color=fg_help, bg_alpha=1.,
-                                            delay=0.3, fade_duration=0.3,
-                                            max_width=20)
+        bg_help = tcod.Color(255, 255, 255)-self.style.fg_color+(128, 128, 0)
+        fg_help = tcod.Color(255, 255, 255)-self.style.bg_color
+        help_style = tcp_style.Style(x=.94, y=.02, width=3, height=3,
+                                     bg_alpha=.5, fg_alpha=.75,
+                                     bg_color=bg_help, fg_color=fg_help,
+                                     border=tcp_style.Border.SOLID)
+        info_style = tcp_style.Style(max_width=20, bg_color=bg_help,
+                                     fg_color=fg_help, visible=False,
+                                     border=tcp_style.Border.SOLID)
+        crosshair_style = tcp_style.Style(width=1, height=1, bg_alpha=.1,
+                                          fg_color=(20, 20, 20), visible=False)
 
-        self.add_childs(self.viewer, self.tooltip, self.help,
-                        self.info_tooltip)
-
-        def viewer_tooltip_event(event: tcod.event.MouseMotion) -> None:
-            viewer = self.viewer
-            tooltip = self.tooltip
-
-            if event.type in ("MOUSEMOTION", "MOUSEFOCUSGAIN"):
-                mcx, mcy = event.tile
-                vabs_x, vabs_y, _, _, vwidth, vheight = viewer.geometry
-                x = viewer.itox(mcx-vabs_x)
-                y = viewer.jtoy(mcy-vabs_y)
-                tooltip.value = f"({x:g}, {y:g})"
-                tooltip.x = vwidth - (len(tooltip.value))
-                tooltip.y = vheight-1
-            else:  # MOUSEFOCUSLOST
-                tooltip.value = ""
-
-        def help_tooltip_event(event: tcod.event.MouseMotion) -> None:
-            help_ = self.help
-            info = self.info_tooltip
-            help_.bg_alpha = 1.0
-            help_.fg_alpha = 1.0
-            if event.type == "MOUSEFOCUSGAIN":
-                s = """
+        # widgets creation
+        viewer = GraphViewer(name="viewer", title=title, style=viewer_style)
+        crosshair = canvas.Canvas(style=crosshair_style)
+        coords = widgets.Tooltip(delay=0, fade_duration=0, style=coords_style)
+        help_ = widgets.Button("?", style=help_style)
+        info = widgets.Tooltip(delay=0.3, fade_duration=0.3, style=info_style)
+        info.value = """
  * Drag and drop the graph viewer with the LMB.
 
  * Zoom with the mouse wheel.
@@ -98,22 +83,60 @@ class GraphDisplay(canvas.Canvas):
 
  * You can zoom the Y-axis only by pressing SHIFT while zooming.
  """
-                self.info_tooltip.value = s
-                info.x = help_.geometry.x-info.geometry.width
-                info.y = help_.geometry.y
+
+        self.childs.add(viewer, crosshair, coords, help_, info)
+
+        crosshair.update_geometry()
+        crosshair.console.ch[0, 0] = 197
+
+        def viewer_crosshair_event(event: tcod.event.MouseMotion) -> None:
+            if event.type == 'MOUSEFOCUSGAIN':
+                crosshair.style.visible = True
+                crosshair.should_redraw = True
+            elif event.type == 'MOUSEFOCUSLOST':
+                crosshair.style.visible = False
+                crosshair.should_redraw = True
+            elif event.type == 'MOUSEMOTION':
+                cx, cy = event.tile
+                rel_x = cx - viewer.geometry.abs_x
+                rel_y = cy - viewer.geometry.abs_y
+                crosshair.style.x = rel_x
+                crosshair.style.y = rel_y
+
+        def viewer_coords_event(event: tcod.event.MouseMotion) -> None:
+            if event.type in ("MOUSEMOTION", "MOUSEFOCUSGAIN"):
+                mcx, mcy = event.tile
+                vabs_x, vabs_y, _, _, vwidth, vheight = viewer.geometry
+                x = viewer.itox(mcx-vabs_x)
+                y = viewer.jtoy(mcy-vabs_y)
+                coords.value = f"({x:g}, {y:g})"
+                coords.style.x = vwidth - (len(coords.value))
+                coords.style.y = vheight-1
             else:  # MOUSEFOCUSLOST
-                info.value = ""
-                help_.bg_alpha = 0.5
-                help_.fg_alpha = 0.75
+                coords.value = ""
 
-        vfoc_dispatcher = self.viewer.focus_dispatcher
-        vfoc_dispatcher.ev_mousemotion += [viewer_tooltip_event]
-        vfoc_dispatcher.ev_mousefocusgain += [viewer_tooltip_event]
-        vfoc_dispatcher.ev_mousefocuslost += [viewer_tooltip_event]
+        def help_info_event(event: tcod.event.MouseMotion) -> None:
+            if event.type == "MOUSEFOCUSGAIN":
+                help_.style.bg_alpha = 1.0
+                help_.style.fg_alpha = 1.0
+                info.start_timer()
+                info.should_update = True
+                info.style.x = help_.geometry.x-info.geometry.width
+                info.style.y = help_.geometry.y
+                info.style.visible = True
+            else:  # MOUSEFOCUSLOST
+                info.should_update = False
+                help_.style.bg_alpha = 0.5
+                help_.style.fg_alpha = 0.75
+                info.style.visible = False
 
-        hfoc_dispatcher = self.help.focus_dispatcher
-        hfoc_dispatcher.ev_mousefocusgain += [help_tooltip_event]
-        hfoc_dispatcher.ev_mousefocuslost += [help_tooltip_event]
+        vfoc_d = viewer.focus_dispatcher
+        vfoc_d.add_events([viewer_coords_event, viewer_crosshair_event],
+                          ["MOUSEMOTION", "MOUSEFOCUSGAIN", "MOUSEFOCUSLOST"])
+
+        hfoc_d = help_.focus_dispatcher
+        hfoc_d.add_events([help_info_event],
+                          ["MOUSEFOCUSGAIN", "MOUSEFOCUSLOST"])
 
 
 class GraphFunction:
@@ -157,12 +180,61 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
         self._shifts = False
         self._ctrls = False
 
-        self.focus_dispatcher.ev_mousemotion += [self._ev_mousemotion]
-        self.focus_dispatcher.ev_mousefocusgain += [self._ev_mousemotion]
-        self.focus_dispatcher.ev_mousefocuslost += [self._ev_mousemotion]
-        self.focus_dispatcher.ev_mousewheel += [self._ev_mousewheel]
-        self.focus_dispatcher.ev_keydown += [self._ev_keydown]
-        self.focus_dispatcher.ev_keyup += [self._ev_keyup]
+        def ev_mousemotion(event: tcod.event.MouseMotion) -> None:
+            mcx, mcy = event.tile
+
+            # Drag
+            dcx = dcy = 0
+            if event.state & tcod.event.BUTTON_LMASK:
+                dcx, dcy = event.tile_motion
+                if dcx:
+                    self.camera.x -= dcx*2**self.camera.zoom_x
+                if dcy:
+                    self.camera.y += dcy*2**self.camera.zoom_y
+                if dcx or dcy:
+                    self.should_update = True
+
+            if event.type == 'MOUSEFOCUSGAIN':
+                tcod.mouse_show_cursor(False)
+                if not self.kbdfocus:
+                    self.kbdfocus_requested = True
+            elif event.type == 'MOUSEFOCUSLOST':
+                tcod.mouse_show_cursor(True)
+
+        def ev_mousewheel(event: tcod.event.MouseWheel) -> None:
+            mv = (-1+event.flipped*2) * event.y
+            is_zx_ok = self.camera.zoom_x < 54
+            is_zy_ok = self.camera.zoom_y < 54
+
+            if self._shifts and (is_zx_ok or mv < 0):
+                self.camera.zoom_x += mv
+            elif self._ctrls and (is_zy_ok or mv < 0):
+                self.camera.zoom_y += mv
+            else:
+                if is_zx_ok or mv < 0:
+                    self.camera.zoom_x += mv
+                if is_zy_ok or mv < 0:
+                    self.camera.zoom_y += mv
+            self.should_update = True
+
+        def ev_keydown(event: tcod.event.KeyDown) -> None:
+            if event.sym in (tcod.event.K_LSHIFT, tcod.event.K_RSHIFT):
+                self._shifts = True
+            elif event.sym in (tcod.event.K_LCTRL, tcod.event.K_RCTRL):
+                self._ctrls = True
+
+        def ev_keyup(event: tcod.event.KeyUp) -> None:
+            if event.sym in (tcod.event.K_LSHIFT, tcod.event.K_RSHIFT):
+                self._shifts = False
+            elif event.sym in (tcod.event.K_LCTRL, tcod.event.K_RCTRL):
+                self._ctrls = False
+
+        foc_d = self.focus_dispatcher
+        foc_d.add_events([ev_mousemotion],
+                         ["MOUSEMOTION", "MOUSEFOCUSLOST", "MOUSEFOCUSGAIN"])
+        foc_d.ev_mousewheel += [ev_mousewheel]
+        foc_d.ev_keydown += [ev_keydown]
+        foc_d.ev_keyup += [ev_keyup]
 
     def itox(self, i: int) -> float:
         return self.camera.x + (i-self.geometry.width//2)*(2**self.camera.zoom_x)
@@ -225,7 +297,7 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
                 self.console.fg[j, i0:i0+y_width] = self.axis_color
 
         def draw_line(p1: Tuple[int, int], p2: Tuple[int, int],
-                      max_height: int) -> int:
+                      max_height: int) -> None:
             i1, j1 = p1
             i2, j2 = p2
             # dealing with ascending or descending function difference here
@@ -269,7 +341,7 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
                     self.console.ch[j, i2] = ord(fun.symbol)
                     self.console.fg[j, i2] = fun.color
 
-        def get_j(i: int, fun: Callable[[float], float],
+        def get_j(i: int, fun: Any,
                   lim_sign: str = '') -> Union[int, str]:
             x = itox(i)
             res = None
@@ -287,7 +359,7 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
 
         width, height = self.geometry[4:]
 
-        self.console.clear(fg=self.fg_color, bg=self.bg_color)
+        self.console.clear(fg=self.style.fg_color, bg=self.style.bg_color)
         self.console.ch[:] = ord("#")
         init_axis()
 
@@ -307,66 +379,6 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
                 prev_j = tmp_j
 
         self.should_update = False
-
-    def _ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
-        mcx, mcy = event.tile
-        abs_x, abs_y = self.geometry.abs_x, self.geometry.abs_y
-        m_rel_x = mcx - abs_x
-        m_rel_y = mcy - abs_y
-
-        # Drag
-        dcx = dcy = 0
-        if event.state & tcod.event.BUTTON_LMASK:
-            dcx, dcy = event.tile_motion
-            if dcx:
-                self.camera.x -= dcx*2**self.camera.zoom_x
-            if dcy:
-                self.camera.y += dcy*2**self.camera.zoom_y
-            if dcx or dcy:
-                self.should_update = True
-        else:  # Tile focus
-            if event.type == 'MOUSEFOCUSGAIN':
-                self.console.bg[m_rel_y, m_rel_x] = (200, 200, 0)
-                if not self.kbdfocus:
-                    self.kbdfocus_requested = True
-            elif event.type == 'MOUSEFOCUSLOST':
-                dcx, dcy = event.tile_motion
-                if 0 <= m_rel_x-dcx < self.geometry.width \
-                        and 0 <= m_rel_y-dcy < self.geometry.height:
-                    self.console.bg[m_rel_y-dcy, m_rel_x-dcx] = self.bg_color
-            elif event.type == 'MOUSEMOTION':
-                dcx, dcy = event.tile_motion
-                if dcx or dcy:
-                    self.console.bg[m_rel_y, m_rel_x] = (200, 200, 0)
-                    self.console.bg[m_rel_y-dcy, m_rel_x-dcx] = self.bg_color
-
-    def _ev_mousewheel(self, event: tcod.event.MouseWheel) -> None:
-        mv = (-1+event.flipped*2) * event.y
-        is_zx_ok = self.camera.zoom_x < 54
-        is_zy_ok = self.camera.zoom_y < 54
-
-        if self._shifts and (is_zx_ok or mv < 0):
-            self.camera.zoom_x += mv
-        elif self._ctrls and (is_zy_ok or mv < 0):
-            self.camera.zoom_y += mv
-        else:
-            if is_zx_ok or mv < 0:
-                self.camera.zoom_x += mv
-            if is_zy_ok or mv < 0:
-                self.camera.zoom_y += mv
-        self.should_update = True
-
-    def _ev_keydown(self, event: tcod.event.KeyDown) -> None:
-        if event.sym in (tcod.event.K_LSHIFT, tcod.event.K_RSHIFT):
-            self._shifts = True
-        elif event.sym in (tcod.event.K_LCTRL, tcod.event.K_RCTRL):
-            self._ctrls = True
-
-    def _ev_keyup(self, event: tcod.event.KeyUp) -> None:
-        if event.sym in (tcod.event.K_LSHIFT, tcod.event.K_RSHIFT):
-            self._shifts = False
-        elif event.sym in (tcod.event.K_LCTRL, tcod.event.K_RCTRL):
-            self._ctrls = False
 
 
 if __name__ == "__main__":

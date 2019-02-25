@@ -1,6 +1,5 @@
 from __future__ import annotations
 import time
-import textwrap
 import tcod.event
 from tcodplus.canvas import Canvas
 from tcodplus import event as tcp_event
@@ -87,21 +86,13 @@ class BaseKeyboardFocusable(BaseFocusable, IKeyboardFocusable):
 
 
 class Tooltip(BaseUpdatable):
-    def __init__(self, value: str = "",
-                 fg_alpha: float = 1, bg_alpha: float = 0.7,
-                 max_width: int = -1, max_height: int = -1,
-                 delay: float = 0., fade_duration: float = 0.,
-                 has_border: bool = True, *args, **kwargs) -> None:
+    def __init__(self, value: str = "", delay: float = 0.,
+                 fade_duration: float = 0., *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._value = value
-        self.fg_alpha = fg_alpha
-        self.bg_alpha = bg_alpha
-        self.max_width = max_width
-        self.max_height = max_height
-        self.has_border = has_border
         self._delay = delay
         self._fade_duration = fade_duration
-        self._last_time = 0
+        self._last_time = 0.
 
         self.should_update = False
 
@@ -111,76 +102,70 @@ class Tooltip(BaseUpdatable):
 
     @value.setter
     def value(self, val) -> None:
-        if val != "":
-            self._last_time = time.perf_counter()
+        if val:
+            self.start_timer()
             self.should_update = True
         else:
             self.should_update = False
         self._value = val
 
+    def start_timer(self) -> None:
+        self._last_time = time.perf_counter()
+
     def update(self) -> None:
-        if self.value:
+        if not self.value:
+            self.should_update = False
+        else:
             dt = time.perf_counter() - self._last_time
             if dt < self._delay:
                 pass
             elif dt > (self._delay + self._fade_duration + 0.5):
                 self.should_update = False
             else:
-                lines = []
-                width = height = 0
+                has_border = self.style.border != 0
+                width = len(self.value) + 2*has_border
+                if self.style.max_width is not None:
+                    width = min(width, self.style.max_width)
 
-                if self.max_width > 0:
-                    tw = textwrap.TextWrapper(width=self.max_width,
-                                              drop_whitespace=False,
-                                              replace_whitespace=False)
-                    lines = self.value.splitlines(keepends=True)
-                    lines = [wp.replace('\n', '') for L in lines
-                             for wp in tw.wrap(L)]
-                    width = max(len(L) for L in lines)
-                else:
-                    lines = [self.value]
-                    width = len(self.value)
-                if self.max_height > 0:
-                    lines = lines[:self.max_height]
-                    height = min(self.max_height, len(lines))
-                else:
-                    height = len(lines)
+                content_w = width - 2*has_border
+                text_h = tcod.console.get_height_rect(content_w, self.value)
+                height = text_h + 2 * has_border
+                if self.style.max_height is not None:
+                    height = min(height, self.style.max_height)
 
-                # width = min(max_width,len(self.value))
-                # height = self.console.get_height_rect()
+                content_h = height - 2*has_border
 
-                if self.has_border:
-                    width += 2
-                    height += 2
+                x = int(has_border)
+                y = int(has_border)
 
-                    self.console = self.init_console(width, height)
-                    self.console.ch[[0, -1], :] = 196
-                    self.console.ch[:, [0, -1]] = 179
-                    self.console.ch[[[0, -1], [-1, 0]],
-                                    [0, -1]] = [[218, 217], [192, 191]]
-                else:
-                    self.console = self.init_console(width, height)
-                self.width = width
-                self.height = height
+                self.style.width = width
+                self.style.height = height
+                self.update_geometry()
 
-                for i, e in enumerate(lines):
-                    self.console.print(self.has_border, i+self.has_border, e)
+                self.console.clear(fg=self.style.fg_color,
+                                   bg=self.style.bg_color)
+                self.console.print_box(x, y, content_w, content_h, self.value,
+                                       self.style.fg_color, self.style.bg_color)
 
-    def draw(self, dest: Canvas) -> None:
+    def draw(self) -> None:
         if len(self.value) > 0:
-            if self.x + self.console.width > dest.geometry.width:
-                self.x = dest.geometry.width - self.console.width
+
+            bg_alpha = self.style.bg_alpha
+            fg_alpha = self.style.fg_alpha
 
             dt = time.perf_counter() - self._last_time
-            fade = 1
-            if self._fade_duration > 0:
+            fade = 1.
+            if self._fade_duration > 0.:
                 fade = (dt - self._delay) / self._fade_duration
             if dt > self._delay:
-                if fade > 1:
-                    fade = 1
-                self.console.blit(dest.console, self.x, self.y,
-                                  fg_alpha=self.fg_alpha * fade,
-                                  bg_alpha=self.bg_alpha * fade)
+                if fade > 1.:
+                    fade = 1.
+                self.style.bg_alpha = bg_alpha * fade
+                self.style.fg_alpha = fg_alpha * fade
+
+                super().draw()
+                self.style.bg_alpha = bg_alpha
+                self.style.fg_alpha = fg_alpha
 
 
 class Button(BoxFocusable, BaseKeyboardFocusable):
@@ -189,6 +174,8 @@ class Button(BoxFocusable, BaseKeyboardFocusable):
     def __init__(self, value: str = "", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._value = value
+        if self.style.height == 0:
+            self.style.height = 1
 
     @property
     def value(self) -> str:
@@ -200,34 +187,104 @@ class Button(BoxFocusable, BaseKeyboardFocusable):
         self.should_update = True
 
     def update(self) -> None:
-        height = 3
-        width = 2 + len(self.value)
-
-        self.width = width
-        self.height = height
-        self.console = self.init_console(width, height)
-        self.console.bg[:] = self.bg_color
-        self.console.fg[:] = self.fg_color
-        self.console.ch[[0, -1], :] = 196
-        self.console.ch[:, [0, -1]] = 179
-        self.console.ch[[[0, -1], [-1, 0]],
-                        [0, -1]] = [[218, 217], [192, 191]]
-        self.console.fg[[0, -1], :] = (20, 20, 20)
-        self.console.fg[:, [0, -1]] = (20, 20, 20)
-        self.console.fg[[[0, -1], [-1, 0]],
-                        [0, -1]] = (20, 20, 20)
-        self.console.print(1, 1, self.value, self.fg_color, self.bg_color)
+        has_border = self.style.border != 0
+        content_w = self.geometry.width - 2*has_border
+        content_h = self.geometry.height - 2*has_border
+        text_h = self.console.get_height_rect(has_border, has_border,
+                                              content_w, content_h, self.value)
+        x = int(has_border)
+        y = (content_h - text_h)//2 + has_border
+        self.console.print_box(x, y, content_w, content_h, self.value,
+                               self.style.fg_color, self.style.bg_color,
+                               alignment=tcod.constants.CENTER)
         self.should_update = False
 
 
 class InputField(BoxFocusable, BaseKeyboardFocusable):
-    def __init__(self, *args, value: str = "", max_len: int = 128,
-                 width: int = 10, height: int = 1, **kwargs):
+    def __init__(self, *args, value: str = "", max_len: int = 128, **kwargs):
         super().__init__(*args, **kwargs)
         self._value = value
         self.max_len = max_len
         self._pos = 0
         self._offset = 0
+
+        if self.style.width == 0:
+            self.style.width = 10  # default value
+        self.style.height = 1
+
+        def _ev_mousefocuslost(self, event: tcp_event.MouseFocusChange) -> None:
+            # self.bg_color = [min(col+20, 255) for col in self.bg_color]
+            # Need to find something better here
+            self.should_update = True
+
+        def _ev_mousefocusgain(self, event: tcp_event.MouseFocusChange) -> None:
+            # self.bg_color = [max(col-20, 0) for col in self.bg_color]
+            # Need to find something better here
+            self.should_update = True
+
+        def _ev_mousebuttondown(self, event: tcod.event.MouseButtonEvent):
+            self.kbdfocus_requested = True
+            self.should_update = True
+
+        def _ev_keydown(self, event: tcod.event.KeyboardEvent) -> None:
+            def right():
+                if self._offset + self._pos == len(self._value):
+                    pass
+                elif self._pos == self.geometry.width-1:
+                    self._offset = self._offset+1
+                else:
+                    self._pos += 1
+
+            if event.sym == tcod.event.K_LEFT:
+                if self._pos == 0:
+                    self._offset = max(0, self._offset-1)
+                else:
+                    self._pos -= 1
+            elif event.sym == tcod.event.K_RIGHT:
+                right()
+            elif event.sym == tcod.event.K_END:
+                val_len = len(self.value)
+                self._offset = max(0, val_len - self.geometry.width+1)
+                self._pos = val_len - self._offset
+            elif event.sym == tcod.event.K_HOME:
+                self._offset = 0
+                self._pos = 0
+            elif event.sym == tcod.event.K_BACKSPACE:
+                if not self._pos == self._offset == 0:
+                    val = self.value
+                    ind = self._pos + self._offset
+                    self.value = val[:ind-1]+val[ind:]
+
+                if self._pos + self._offset == 0:
+                    pass
+                elif self._offset > 0:
+                    self._offset = self._offset-1
+                else:
+                    self._pos -= 1
+            elif event.sym == tcod.event.K_DELETE:
+                if self._offset + self._pos == len(self.value):
+                    pass
+                else:
+                    val = self.value
+                    ind = self._offset + self._pos
+                    self.value = val[:ind]+val[ind+1:]
+
+            self.should_update = True
+
+        def _ev_textinput(self, event: tcod.event.TextInput):
+            def right():
+                if self._offset + self._pos == len(self._value):
+                    pass
+                elif self._pos == self.geometry.width-1:
+                    self._offset = self._offset+1
+                else:
+                    self._pos += 1
+            if len(self.value) < self.max_len:
+                val = self.value
+                insert_ind = self._offset + self._pos
+                self.value = val[:insert_ind]+event.text+val[insert_ind:]
+                right()
+                self.should_update = True
 
         self.focus_dispatcher.ev_mousefocusgain += [self._ev_mousefocusgain]
         self.focus_dispatcher.ev_mousefocuslost += [self._ev_mousefocuslost]
@@ -245,87 +302,16 @@ class InputField(BoxFocusable, BaseKeyboardFocusable):
         self._value = val
 
     def update(self) -> None:
-        height = 1
         width = self.geometry.width
         visible_value = self.value[self._offset:self._offset+width]
 
-        self.console = self.init_console(width, height)
+        self.console = self.init_console()
         self.console.print(0, 0, visible_value)
+
+        # Need something better here
         if self.kbdfocus:
-            self.console.bg[0, self._pos] = [255-col for col in self.bg_color]
-            self.console.fg[0, self._pos] = [255-col for col in self.fg_color]
+            self.console.bg[0, self._pos] = [
+                255-col for col in self.style.bg_color]
+            self.console.fg[0, self._pos] = [
+                255-col for col in self.style.fg_color]
         self.should_update = False
-
-    def _ev_mousefocuslost(self, event: tcp_event.MouseFocusChange) -> None:
-        # self.bg_color = [min(col+20, 255) for col in self.bg_color]
-        # Need to find something better here
-        self.should_update = True
-
-    def _ev_mousefocusgain(self, event: tcp_event.MouseFocusChange) -> None:
-        # self.bg_color = [max(col-20, 0) for col in self.bg_color]
-        # Need to find something better here
-        self.should_update = True
-
-    def _ev_mousebuttondown(self, event: tcod.event.MouseButtonEvent):
-        self.kbdfocus_requested = True
-        self.should_update = True
-
-    def _ev_keydown(self, event: tcod.event.KeyboardEvent) -> None:
-        def right():
-            if self._offset + self._pos == len(self._value):
-                pass
-            elif self._pos == self.geometry.width-1:
-                self._offset = self._offset+1
-            else:
-                self._pos += 1
-
-        if event.sym == tcod.event.K_LEFT:
-            if self._pos == 0:
-                self._offset = max(0, self._offset-1)
-            else:
-                self._pos -= 1
-        elif event.sym == tcod.event.K_RIGHT:
-            right()
-        elif event.sym == tcod.event.K_END:
-            val_len = len(self.value)
-            self._offset = max(0, val_len - self.geometry.width+1)
-            self._pos = val_len - self._offset
-        elif event.sym == tcod.event.K_HOME:
-            self._offset = 0
-            self._pos = 0
-        elif event.sym == tcod.event.K_BACKSPACE:
-            if not self._pos == self._offset == 0:
-                val = self.value
-                ind = self._pos + self._offset
-                self.value = val[:ind-1]+val[ind:]
-
-            if self._pos + self._offset == 0:
-                pass
-            elif self._offset > 0:
-                self._offset = self._offset-1
-            else:
-                self._pos -= 1
-        elif event.sym == tcod.event.K_DELETE:
-            if self._offset + self._pos == len(self.value):
-                pass
-            else:
-                val = self.value
-                ind = self._offset + self._pos
-                self.value = val[:ind]+val[ind+1:]
-
-        self.should_update = True
-
-    def _ev_textinput(self, event: tcod.event.TextInput):
-        def right():
-            if self._offset + self._pos == len(self._value):
-                pass
-            elif self._pos == self.geometry.width-1:
-                self._offset = self._offset+1
-            else:
-                self._pos += 1
-        if len(self.value) < self.max_len:
-            val = self.value
-            insert_ind = self._offset + self._pos
-            self.value = val[:insert_ind]+event.text+val[insert_ind:]
-            right()
-            self.should_update = True
