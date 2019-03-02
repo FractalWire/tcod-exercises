@@ -1,7 +1,13 @@
 from __future__ import annotations
-from typing import Union, Tuple, Optional
+from collections.abc import Mapping
+from typing import Union, Tuple, Optional, Any, Dict
 from enum import IntEnum, auto
 import tcod
+
+
+class Display(IntEnum):
+    NONE = 0
+    INITIAL = auto()
 
 
 class Origin(IntEnum):
@@ -69,12 +75,14 @@ def draw_border(console: tcod.console.Console, style: Style) -> None:
         console.fg[:, [0, -1]] = fg
 
 
-def transform_coords(x: int, y: int, x_max: int, y_max: int,
-                     width: int, height: int,
-                     origin: Origin, outbound: Outbound) -> Tuple[int, int]:
-    if outbound == Outbound.PARTIAL:
-        x, y = x % x_max, y % y_max
+def origin_coords(x: int, y: int, x_max: int, y_max: int,
+                  width: int, height: int,
+                  origin: Origin) -> Tuple[int, int]:
+    """origin_coords returns the coordinate to as if it was a TOP_LEFT origin
 
+    Returns:
+        Tuple[int]: the transformed coordinates (x,y)
+    """
     var = {
         Origin.TOP_LEFT: (0, 0),
         Origin.TOP_RIGHT: (-width, 0),
@@ -85,24 +93,51 @@ def transform_coords(x: int, y: int, x_max: int, y_max: int,
     x = x + var[origin][0]
     y = y + var[origin][1]
 
-    if outbound == Outbound.STRICT:
-        x = sorted([0-var[origin][0], x, x_max-width-var[origin][0]])[1]
-        y = sorted([0-var[origin][1], y, y_max-height-var[origin][1]])[1]
+    return (x, y)
+
+
+def bounded_coords(x: int, y: int, x_max: int, y_max: int,
+                   width: int, height: int,
+                   outbound: Outbound) -> Tuple[int, int]:
+    """bounded_coords returns the coordinates based on the outbound style
+
+    Outbound.PARTIAL makes the negative coordinate start from the opposite side.
+    A coordinate > coordinate_max will be restricted to [0, max_coordinate]
+
+    Outbound.STRICT makes the coordinates 'stick' to a side if
+    0 > coordinate > max_coordinate
+
+    Returns:
+        Tuple[int]: the bounded coordinates (x,y)
+    """
+    if outbound == Outbound.PARTIAL:
+        x, y = x % x_max, y % y_max
+
+    elif outbound == Outbound.STRICT:
+        x = sorted([0, x, x_max-width])[1]
+        y = sorted([0, y, y_max-height])[1]
 
     return (x, y)
+
+
+OptionalColor = Optional[Tuple[int, int, int]]
+
+
+def _get_optional_color(value: OptionalColor) -> tcod.Color():
+    return None if value is None else tcod.Color(*value)
 
 
 class Style:
     """The various styles applicable to a Canvas
 
     Args :
-        x: Union[int,float]: the relative x position of a Canvas in respect to
-            his hypotetical parent
-        y: Union[int,float]: the relative y position of a Canvas in respect to
-            his hypotetical parent
-        width: Union[int,float]: the relative width of a Canvas in respect to
-            his hypotetical parent
-        height: Union[int,float]: the relative height of a Canvas in respect
+        x: Union[str,int,float]: the relative x position of a Canvas in respect
+            to his hypotetical parent
+        y: Union[str,int,float]: the relative y position of a Canvas in respect
+            to his hypotetical parent
+        width: Union[str,int,float]: the relative width of a Canvas in respect
+            to his hypotetical parent
+        height: Union[str,int,float]: the relative height of a Canvas in respect
             to his hypotetical parent
         origin: Origin: the point of origin from where the Canvas should be
             drawn. Does not affect the internal origin of the Canvas (top-left)
@@ -124,11 +159,20 @@ class Style:
 
     """
 
-    def __init__(self, **kwargs):
-        self.x: Union[int, float] = 0
-        self.y: Union[int, float] = 0
-        self.width: Union[int, float] = 0
-        self.height: Union[int, float] = 0
+    def __init__(self, other: Any = None, **kwargs):
+        # TODO: outsource default args. Right now double memory usage for styles
+        self._default_attrs = dict()
+        self._non_default_attrs = set()
+
+        self._is_modified = False
+        self._lock_attrs = False
+
+        # Following attrs will be default
+
+        self.x: Union[str, int, float] = "auto"
+        self.y: Union[str, int, float] = "auto"
+        self.width: Union[str, int, float] = "auto"
+        self.height: Union[str, int, float] = "auto"
         self.min_width: Optional[int] = None
         self.max_width: Optional[int] = None
         self.min_height: Optional[int] = None
@@ -139,61 +183,121 @@ class Style:
 
         self.bg_alpha = 1.
         self.fg_alpha = 1.
-        self._bg_color = tcod.black
-        self._fg_color = tcod.white
-        self._key_color: Optional[tcod.Color] = None
+        self._bg_color: OptionalColor = None  # Probably no Optional here...
+        self._fg_color: OptionalColor = None
+        self._key_color: OptionalColor = None
+
+        # TODO: really need some better default handling !!!
+        self.bg_color = tcod.black  # Important for deafault registration
+        self.fg_color = tcod.white
 
         # self.has_border = False
         self.border = Border.NONE
-        self._border_bg_color: Optional[tcod.Color] = None
-        self._border_fg_color: Optional[tcod.Color] = None
+        self._border_bg_color: OptionalColor = None
+        self._border_fg_color: OptionalColor = None
 
+        self.border_bg_color = None
+        self.border_fg_color = None
+
+        self.display = Display.INITIAL
         self.visible = True
 
-        self.update(kwargs)
+        self._lock_attrs = True  # following update will be non-default
+        self.update(other, **kwargs)
 
-    def update(self, kwargs):
-        for k, v in kwargs.items():
-            if not hasattr(self, k):
-                raise AttributeError(f"{k} is not a valid Style attribute.")
-            setattr(self, k, v)
+    def __setattr__(self: Style, name: str, value: Any) -> None:
+        if name[0] != "_":
+            if self._lock_attrs:
+                if not hasattr(self, name):
+                    raise AttributeError(f"{name} is not a valid "
+                                         f"Style attribute.")
+                else:
+                    self._non_default_attrs.add(name)
+                    self._is_modified = True
+            else:
+                self._default_attrs[name] = value
+        super().__setattr__(name, value)
+
+    def __copy__(self) -> Style:
+        return type(self)(self.non_defaults)
+
+    def __or__(self, other: Union[Style, Mapping]) -> Style:
+        # only get the non-default style that are not non-default for self
+        if isinstance(other, Mapping):
+            d_other = {k: other[k]
+                       for k in other.keys() - self._non_default_attrs}
+        else:
+            d_other = {k: getattr(other, k)
+                       for k in other._non_default_attrs - self._non_default_attrs}
+        d_combined = {**self.non_defaults, **d_other}
+        return type(self)(**d_combined)
+
+    def __str__(self) -> str:
+        return f"{type(self).__name__}({self.non_defaults})"
 
     @property
-    def bg_color(self):
+    def is_modified(self):
+        return self._is_modified
+
+    @property
+    def non_defaults(self) -> Dict[str, Any]:
+        return {k: getattr(self, k) for k in self._non_default_attrs}
+
+    def update(self, other: Any = None, **kwargs) -> None:
+        if other is not None:
+            for k, v in other.items() if isinstance(other, Mapping) else other:
+                setattr(self, k, v)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def copy(self) -> Style:
+        return self.__copy__()
+
+    def reset_defaults(self, *args: str) -> None:
+        if not args:
+            args = self._default_attrs
+        for arg in args:
+            if isinstance(getattr(self, arg), property):
+                arg = f"_{arg}"
+            setattr(self, arg, self._default_attrs[arg])
+            self._non_default_attrs -= {arg}
+
+    @property
+    def bg_color(self) -> None:
         return self._bg_color
 
     @bg_color.setter
-    def bg_color(self, value: Tuple[int, int, int]):
-        self._bg_color = tcod.Color(*value)
+    def bg_color(self, value: OptionalColor) -> None:
+        self._bg_color = _get_optional_color(value)
 
     @property
-    def fg_color(self):
+    def fg_color(self) -> None:
         return self._fg_color
 
     @fg_color.setter
-    def fg_color(self, value: Tuple[int, int, int]):
-        self._fg_color = tcod.Color(*value)
+    def fg_color(self, value: OptionalColor) -> None:
+        self._fg_color = _get_optional_color(value)
 
     @property
-    def key_color(self):
+    def key_color(self) -> None:
         return self._key_color
 
     @key_color.setter
-    def key_color(self, value: Tuple[int, int, int]):
-        self._key_color = tcod.Color(*value)
+    def key_color(self, value: OptionalColor) -> None:
+        self._key_color = _get_optional_color(value)
 
     @property
-    def border_bg_color(self):
+    def border_bg_color(self) -> None:
         return self._border_bg_color
 
     @border_bg_color.setter
-    def border_bg_color(self, value: Tuple[int, int, int]):
-        self._border_bg_color = tcod.Color(*value)
+    def border_bg_color(self, value: OptionalColor) -> None:
+        self._border_bg_color = _get_optional_color(value)
 
     @property
-    def border_fg_color(self):
+    def border_fg_color(self) -> None:
         return self._border_fg_color
 
     @border_fg_color.setter
-    def border_fg_color(self, value: Tuple[int, int, int]):
-        self._border_fg_color = tcod.Color(*value)
+    def border_fg_color(self, value: OptionalColor) -> None:
+        self._border_fg_color = _get_optional_color(value)

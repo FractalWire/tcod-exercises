@@ -96,7 +96,7 @@ class CanvasDispatcher:
 
 
 class KeyboardFocusChange:
-    def __init__(self, type_: str):
+    def __init__(self, type_: str) -> None:
         if type_ not in ["KEYBOARDFOCUSLOST", "KEYBOARDFOCUSGAIN"]:
             raise ValueError(
                 "type_ must be KEYBOARDFOCUSLOST or KEYBOARDFOCUSGAIN")
@@ -104,7 +104,7 @@ class KeyboardFocusChange:
 
 
 class MouseFocusChange:
-    def __init__(self, event: tcod.event.MouseMotion, type_: str):
+    def __init__(self, event: tcod.event.MouseMotion, type_: str) -> None:
         if type_ not in ["MOUSEFOCUSGAIN", "MOUSEFOCUSLOST"]:
             raise ValueError("type_ must be MOUSEFOCUSLOST or MOUSEFOCUSGAIN")
         self.type = type_

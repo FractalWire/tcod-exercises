@@ -10,7 +10,8 @@ def main():
     font = "data/fonts/dejavu10x10_gs_tc.png"
     root_canvas = canvas.RootCanvas(width, height,
                                     "Challenge 7 : Input box and button",
-                                    font)
+                                    font,
+                                    renderer=tcod.constants.RENDERER_OPENGL)
 
     style = tcp_style.Style(x=5, y=height-5, width=width-10,
                             height=5, bg_color=(20, 20, 20))
@@ -21,7 +22,8 @@ def main():
     input_field = widgets.InputField(max_len=10, style=style)
 
     style = tcp_style.Style(x=.5, y=1, width=10, height=3,
-                            bg_color=(200, 20, 20))
+                            bg_color=(200, 20, 20), fg_color=(200, 200, 200),
+                            border=tcp_style.Border.DOTTED)
     button_canvas = widgets.Button("MyButton", style=style)
 
     root_canvas.childs.add(input_canvas)

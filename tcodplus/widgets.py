@@ -1,9 +1,12 @@
 from __future__ import annotations
+from typing import Union
+from collections.abc import Mapping
 import time
 import tcod.event
 from tcodplus.canvas import Canvas
 from tcodplus import event as tcp_event
 from tcodplus.interfaces import IUpdatable, IFocusable, IMouseFocusable, IKeyboardFocusable
+from tcodplus.style import Style
 
 
 ################
@@ -11,7 +14,7 @@ from tcodplus.interfaces import IUpdatable, IFocusable, IMouseFocusable, IKeyboa
 ################
 
 class BaseUpdatable(Canvas, IUpdatable):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._should_update = True
 
@@ -25,19 +28,63 @@ class BaseUpdatable(Canvas, IUpdatable):
 
 
 class BaseFocusable(BaseUpdatable, IFocusable):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, style_focus: Union[dict, Style] = dict(),
+                 **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._focus_dispatcher = tcp_event.CanvasDispatcher()
+        self._current_style = self._style
+        self._style_focus = None
+        self.style_focus = style_focus
+        self._is_focus = False
+
+        def style_focus_on(event: tcod.event.Event) -> None:
+            self._is_focus = True
+            self.force_redraw = True
+
+        def style_focus_off(event: tcod.event.Event) -> None:
+            self._is_focus = False
+            self.force_redraw = True
+
+        self.focus_dispatcher.add_events([style_focus_on],
+                                         ["KEYBOARDFOCUSGAIN", "MOUSEFOCUSGAIN"])
+        self.focus_dispatcher.add_events([style_focus_off],
+                                         ["KEYBOARDFOCUSLOST", "MOUSEFOCUSLOST"])
+
+    def styles(self) -> Style:
+        style = super().styles()
+        if self._is_focus:
+            style = self.style_focus | style
+        return style
 
     @property
-    def focus_dispatcher(self):
+    def focus_dispatcher(self) -> None:
         return self._focus_dispatcher
+
+    @property
+    def style(self) -> Style:
+        return self._style
+
+    @style.setter
+    def style(self, value: Union[Style, Mapping]) -> None:
+        self._style = value if isinstance(value, Style) \
+            else Style(value)
+        self.force_redraw = True
+
+    @property
+    def style_focus(self) -> Style:
+        return self._style_focus
+
+    @style_focus.setter
+    def style_focus(self, value: Union[Style, Mapping]) -> None:
+        self._style_focus = value if isinstance(value, Style) \
+            else Style(value)
+        self.force_redraw = True
 
 
 class BoxFocusable(BaseFocusable, IMouseFocusable):
     def mousefocus(self, event: tcod.event.MouseMotion) -> bool:
         mcx, mcy = event.tile
-        abs_x, abs_y, _, _, width, height = self.geometry
+        abs_x, abs_y, _, _, width, height, _, _ = self.geometry
         m_rel_x = mcx - abs_x
         m_rel_y = mcy - abs_y
         is_in_x = (0 <= m_rel_x <= width-1)
@@ -56,7 +103,7 @@ class KeyColorFocusable(BaseFocusable, IMouseFocusable):
 
 
 class BaseKeyboardFocusable(BaseFocusable, IKeyboardFocusable):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._kbdfocus = False
         self._kbdfocus_requested = False
@@ -94,6 +141,10 @@ class Tooltip(BaseUpdatable):
         self._fade_duration = fade_duration
         self._last_time = 0.
 
+        self.style.width = "auto"
+        self.style.height = "auto"
+        self.style.visible = False
+
         self.should_update = False
 
     @property
@@ -113,46 +164,26 @@ class Tooltip(BaseUpdatable):
         self._last_time = time.perf_counter()
 
     def update(self) -> None:
-        if not self.value:
-            self.should_update = False
-        else:
-            dt = time.perf_counter() - self._last_time
-            if dt < self._delay:
-                pass
-            elif dt > (self._delay + self._fade_duration + 0.5):
-                self.should_update = False
-            else:
-                has_border = self.style.border != 0
-                width = len(self.value) + 2*has_border
-                if self.style.max_width is not None:
-                    width = min(width, self.style.max_width)
+        style = self.styles()
+        has_border = style.border != 0
+        width = len(self.value)
+        if style.max_width is not None:
+            width = min(width, style.max_width - 2*has_border)
 
-                content_w = width - 2*has_border
-                text_h = tcod.console.get_height_rect(content_w, self.value)
-                height = text_h + 2 * has_border
-                if self.style.max_height is not None:
-                    height = min(height, self.style.max_height)
+        height = tcod.console.get_height_rect(width, self.value)
+        if style.max_height is not None:
+            height = min(height, style.max_height - 2*has_border)
 
-                content_h = height - 2*has_border
+        self.console = self.init_console(width, height)
 
-                x = int(has_border)
-                y = int(has_border)
-
-                self.style.width = width
-                self.style.height = height
-                self.update_geometry()
-
-                self.console.clear(fg=self.style.fg_color,
-                                   bg=self.style.bg_color)
-                self.console.print_box(x, y, content_w, content_h, self.value,
-                                       self.style.fg_color, self.style.bg_color)
+        self.base_drawing()
+        self.console.print_box(0, 0, width, height, self.value,
+                               style.fg_color, style.bg_color)
+        self.should_update = False
+        self.force_redraw = True
 
     def draw(self) -> None:
-        if len(self.value) > 0:
-
-            bg_alpha = self.style.bg_alpha
-            fg_alpha = self.style.fg_alpha
-
+        if self.value:
             dt = time.perf_counter() - self._last_time
             fade = 1.
             if self._fade_duration > 0.:
@@ -160,12 +191,18 @@ class Tooltip(BaseUpdatable):
             if dt > self._delay:
                 if fade > 1.:
                     fade = 1.
+
+                bg_alpha = self.style.bg_alpha
+                fg_alpha = self.style.fg_alpha
                 self.style.bg_alpha = bg_alpha * fade
                 self.style.fg_alpha = fg_alpha * fade
 
                 super().draw()
                 self.style.bg_alpha = bg_alpha
                 self.style.fg_alpha = fg_alpha
+
+            if dt <= self._delay + self._fade_duration:
+                self.force_redraw = True
 
 
 class Button(BoxFocusable, BaseKeyboardFocusable):
@@ -174,8 +211,6 @@ class Button(BoxFocusable, BaseKeyboardFocusable):
     def __init__(self, value: str = "", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._value = value
-        if self.style.height == 0:
-            self.style.height = 1
 
     @property
     def value(self) -> str:
@@ -187,50 +222,56 @@ class Button(BoxFocusable, BaseKeyboardFocusable):
         self.should_update = True
 
     def update(self) -> None:
-        has_border = self.style.border != 0
-        content_w = self.geometry.width - 2*has_border
-        content_h = self.geometry.height - 2*has_border
-        text_h = self.console.get_height_rect(has_border, has_border,
-                                              content_w, content_h, self.value)
-        x = int(has_border)
-        y = (content_h - text_h)//2 + has_border
-        self.console.print_box(x, y, content_w, content_h, self.value,
-                               self.style.fg_color, self.style.bg_color,
+        content_w = max(len(self.value), self.geometry.content_width)
+        content_h = max(1, self.geometry.content_height)
+        if content_w != self.console.width or content_h != self.console.height:
+            self.console = self.init_console(content_w, content_h)
+            self.update_geometry()
+
+        text_h = self.console.get_height_rect(0, 0, 0, 0, self.value)
+
+        y = (content_h - text_h)//2
+
+        style = self.styles()
+        self.console.print_box(0, y, content_w, content_h, self.value,
+                               style.fg_color, style.bg_color,
                                alignment=tcod.constants.CENTER)
         self.should_update = False
 
 
 class InputField(BoxFocusable, BaseKeyboardFocusable):
-    def __init__(self, *args, value: str = "", max_len: int = 128, **kwargs):
+    def __init__(self, *args, value: str = "", max_len: int = 128,
+                 **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._value = value
         self.max_len = max_len
         self._pos = 0
         self._offset = 0
 
-        if self.style.width == 0:
-            self.style.width = 10  # default value
-        self.style.height = 1
+        style = self.styles()
+        if style.width == 0:
+            style.width = 10  # default value
+        style.height = 1
 
-        def _ev_mousefocuslost(self, event: tcp_event.MouseFocusChange) -> None:
+        def ev_mousefocuslost(event: tcp_event.MouseFocusChange) -> None:
             # self.bg_color = [min(col+20, 255) for col in self.bg_color]
             # Need to find something better here
             self.should_update = True
 
-        def _ev_mousefocusgain(self, event: tcp_event.MouseFocusChange) -> None:
+        def ev_mousefocusgain(event: tcp_event.MouseFocusChange) -> None:
             # self.bg_color = [max(col-20, 0) for col in self.bg_color]
             # Need to find something better here
             self.should_update = True
 
-        def _ev_mousebuttondown(self, event: tcod.event.MouseButtonEvent):
+        def ev_mousebuttondown(event: tcod.event.MouseButtonEvent) -> None:
             self.kbdfocus_requested = True
             self.should_update = True
 
-        def _ev_keydown(self, event: tcod.event.KeyboardEvent) -> None:
+        def ev_keydown(event: tcod.event.KeyboardEvent) -> None:
             def right():
                 if self._offset + self._pos == len(self._value):
                     pass
-                elif self._pos == self.geometry.width-1:
+                elif self._pos == self.geometry.content_width-1:
                     self._offset = self._offset+1
                 else:
                     self._pos += 1
@@ -244,7 +285,7 @@ class InputField(BoxFocusable, BaseKeyboardFocusable):
                 right()
             elif event.sym == tcod.event.K_END:
                 val_len = len(self.value)
-                self._offset = max(0, val_len - self.geometry.width+1)
+                self._offset = max(0, val_len - self.geometry.content_width+1)
                 self._pos = val_len - self._offset
             elif event.sym == tcod.event.K_HOME:
                 self._offset = 0
@@ -271,11 +312,11 @@ class InputField(BoxFocusable, BaseKeyboardFocusable):
 
             self.should_update = True
 
-        def _ev_textinput(self, event: tcod.event.TextInput):
+        def ev_textinput(event: tcod.event.TextInput) -> None:
             def right():
                 if self._offset + self._pos == len(self._value):
                     pass
-                elif self._pos == self.geometry.width-1:
+                elif self._pos == self.geometry.content_width-1:
                     self._offset = self._offset+1
                 else:
                     self._pos += 1
@@ -286,11 +327,11 @@ class InputField(BoxFocusable, BaseKeyboardFocusable):
                 right()
                 self.should_update = True
 
-        self.focus_dispatcher.ev_mousefocusgain += [self._ev_mousefocusgain]
-        self.focus_dispatcher.ev_mousefocuslost += [self._ev_mousefocuslost]
-        self.focus_dispatcher.ev_mousebuttondown += [self._ev_mousebuttondown]
-        self.focus_dispatcher.ev_keydown += [self._ev_keydown]
-        self.focus_dispatcher.ev_textinput += [self._ev_textinput]
+        self.focus_dispatcher.ev_mousefocusgain += [ev_mousefocusgain]
+        self.focus_dispatcher.ev_mousefocuslost += [ev_mousefocuslost]
+        self.focus_dispatcher.ev_mousebuttondown += [ev_mousebuttondown]
+        self.focus_dispatcher.ev_keydown += [ev_keydown]
+        self.focus_dispatcher.ev_textinput += [ev_textinput]
 
     @property
     def value(self) -> str:
@@ -302,16 +343,21 @@ class InputField(BoxFocusable, BaseKeyboardFocusable):
         self._value = val
 
     def update(self) -> None:
-        width = self.geometry.width
+        width = self.geometry.content_width
         visible_value = self.value[self._offset:self._offset+width]
 
-        self.console = self.init_console()
-        self.console.print(0, 0, visible_value)
+        # TODO: Better color scheme please
+        style = self.styles()
+        bg = style.bg_color * \
+            (0.75 if len(self.value) == self.max_len else 1)
 
-        # Need something better here
+        self.console.clear(bg=bg, fg=style.fg_color)
+        self.console.print(0, 0, visible_value, bg=bg)
+
+        # TODO: Need something better here for opposite color
         if self.kbdfocus:
-            self.console.bg[0, self._pos] = [
-                255-col for col in self.style.bg_color]
-            self.console.fg[0, self._pos] = [
-                255-col for col in self.style.fg_color]
+            self.console.bg[0, self._pos] = [255-col
+                                             for col in style.bg_color]
+            self.console.fg[0, self._pos] = [255-col
+                                             for col in style.fg_color]
         self.should_update = False

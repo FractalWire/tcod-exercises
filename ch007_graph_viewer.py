@@ -16,6 +16,7 @@ def main():
     root_canvas = canvas.RootCanvas(width, height,
                                     "Challenge 7 : GraphViewer",
                                     font, flags,
+                                    renderer=tcod.constants.RENDERER_OPENGL,
                                     bg_color=(20, 20, 20))
 
     style = tcp_style.Style(x=.05, y=.05, width=.9, height=.9,
@@ -58,9 +59,10 @@ class GraphDisplay(canvas.Canvas):
 
         bg_help = tcod.Color(255, 255, 255)-self.style.fg_color+(128, 128, 0)
         fg_help = tcod.Color(255, 255, 255)-self.style.bg_color
-        help_style = tcp_style.Style(x=.94, y=.02, width=3, height=3,
+        help_style = tcp_style.Style(x=.98, y=.02, width=3, height=3,
                                      bg_alpha=.5, fg_alpha=.75,
                                      bg_color=bg_help, fg_color=fg_help,
+                                     origin=tcp_style.Origin.TOP_RIGHT,
                                      border=tcp_style.Border.SOLID)
         info_style = tcp_style.Style(max_width=20, bg_color=bg_help,
                                      fg_color=fg_help, visible=False,
@@ -87,15 +89,16 @@ class GraphDisplay(canvas.Canvas):
         self.childs.add(viewer, crosshair, coords, help_, info)
 
         crosshair.update_geometry()
+        crosshair.base_drawing()  # should probably override instead
         crosshair.console.ch[0, 0] = 197
 
         def viewer_crosshair_event(event: tcod.event.MouseMotion) -> None:
             if event.type == 'MOUSEFOCUSGAIN':
                 crosshair.style.visible = True
-                crosshair.should_redraw = True
+                crosshair.force_redraw = True
             elif event.type == 'MOUSEFOCUSLOST':
                 crosshair.style.visible = False
-                crosshair.should_redraw = True
+                crosshair.force_redraw = True
             elif event.type == 'MOUSEMOTION':
                 cx, cy = event.tile
                 rel_x = cx - viewer.geometry.abs_x
@@ -106,7 +109,7 @@ class GraphDisplay(canvas.Canvas):
         def viewer_coords_event(event: tcod.event.MouseMotion) -> None:
             if event.type in ("MOUSEMOTION", "MOUSEFOCUSGAIN"):
                 mcx, mcy = event.tile
-                vabs_x, vabs_y, _, _, vwidth, vheight = viewer.geometry
+                vabs_x, vabs_y, _, _, _, _, vwidth, vheight = viewer.geometry
                 x = viewer.itox(mcx-vabs_x)
                 y = viewer.jtoy(mcy-vabs_y)
                 coords.value = f"({x:g}, {y:g})"
@@ -120,14 +123,14 @@ class GraphDisplay(canvas.Canvas):
                 help_.style.bg_alpha = 1.0
                 help_.style.fg_alpha = 1.0
                 info.start_timer()
-                info.should_update = True
                 info.style.x = help_.geometry.x-info.geometry.width
                 info.style.y = help_.geometry.y
+                info.should_update = True
                 info.style.visible = True
             else:  # MOUSEFOCUSLOST
-                info.should_update = False
                 help_.style.bg_alpha = 0.5
                 help_.style.fg_alpha = 0.75
+                info.should_update = False
                 info.style.visible = False
 
         vfoc_d = viewer.focus_dispatcher
@@ -138,11 +141,17 @@ class GraphDisplay(canvas.Canvas):
         hfoc_d.add_events([help_info_event],
                           ["MOUSEFOCUSGAIN", "MOUSEFOCUSLOST"])
 
+    def add_fun(self, values: Tuple[str, str, str, str]) -> None:
+        print("More fun !")
+        name, fun, symbol, color = values
+        gf = GraphFunction(name, fun, symbol)
+        self.childs["viewer"].funs[name] = gf
+        self.childs["viewer"].should_update = True
+
 
 class GraphFunction:
-    def __init__(self, name: str, fun_expr: str,
-                 color: Tuple[int, int, int] = None,
-                 symbol: str = "+", title: str = ""):
+    def __init__(self, name: str, fun_expr: str, symbol: str = "+",
+                 color: Tuple[int, int, int] = None, title: str = ""):
         self.name = name
         expr = sy.sympify(fun_expr)
         if len(expr.free_symbols) > 1:
@@ -237,20 +246,20 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
         foc_d.ev_keyup += [ev_keyup]
 
     def itox(self, i: int) -> float:
-        return self.camera.x + (i-self.geometry.width//2)*(2**self.camera.zoom_x)
+        return self.camera.x + (i-self.geometry.content_width//2)*(2**self.camera.zoom_x)
 
     def jtoy(self, j: int) -> float:
-        return self.camera.y + (self.geometry.height//2-j)*(2**self.camera.zoom_y)
+        return self.camera.y + (self.geometry.content_height//2-j)*(2**self.camera.zoom_y)
 
     def xtoi(self, x: float) -> int:
         x = sorted([-sys.maxsize, x, sys.maxsize])[1]
         return round((x - self.camera.x) / (2**self.camera.zoom_x)
-                     + self.geometry.width // 2)
+                     + self.geometry.content_width // 2)
 
     def ytoj(self, y: float) -> int:
         y = sorted([-sys.maxsize, y, sys.maxsize])[1]
         return round(((y - self.camera.y) / (2**self.camera.zoom_y)
-                      - self.geometry.height // 2) * (-1))
+                      - self.geometry.content_height // 2) * (-1))
 
     def update(self):
         itox = self.itox
@@ -259,7 +268,7 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
         ytoj = self.ytoj
 
         def init_axis():
-            width, height = self.geometry[4:]
+            width, height = self.geometry[6:]
             i_axis = sorted([0, xtoi(0), width-1])[1]
             j_axis = sorted([0, ytoj(0), height-1])[1]
 
@@ -357,7 +366,7 @@ class GraphViewer(widgets.BoxFocusable, widgets.BaseKeyboardFocusable):
             j = ytoj(y)
             return j
 
-        width, height = self.geometry[4:]
+        width, height = self.geometry[6:]
 
         self.console.clear(fg=self.style.fg_color, bg=self.style.bg_color)
         self.console.ch[:] = ord("#")

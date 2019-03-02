@@ -9,8 +9,22 @@ if TYPE_CHECKING:
 
 
 class IDrawable(abc.ABC):
+    @property
+    @abc.abstractmethod
+    def force_redraw(self) -> bool:
+        pass
+
+    @property
+    @force_redraw.setter
+    def force_redraw(self, value: bool) -> None:
+        pass
+
     @abc.abstractmethod
     def draw(self, dest: Canvas) -> None:
+        pass
+
+    @abc.abstractmethod
+    def base_drawing(self, console: tcod.console.Console) -> None:
         pass
 
 

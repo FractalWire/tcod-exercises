@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections.abc import Mapping
-from typing import List, NamedTuple, Tuple, Optional
+from typing import List, NamedTuple, Tuple, Optional, Union
 import tcod
 import tcod.event
 import tcodplus.style as tcp_style
@@ -18,7 +18,8 @@ def _genCanvasID() -> str:
 
 Geometry = NamedTuple('Geometry', [('abs_x', int), ('abs_y', int),
                                    ('x', int), ('y', int),
-                                   ('width', int), ('height', int)])
+                                   ('width', int), ('height', int),
+                                   ('content_width', int), ('content_height', int)])
 
 
 class CanvasChilds(dict):
@@ -35,12 +36,12 @@ class CanvasChilds(dict):
         canvas : the canvas in which it is used
     """
 
-    def __init__(self, canvas: Canvas, other=None, **kwargs):
+    def __init__(self, canvas: Canvas, other=None, **kwargs) -> None:
         super().__init__()
         self.canvas = canvas
         self.update(other, **kwargs)
 
-    def __setitem__(self, k: str, v: Canvas):
+    def __setitem__(self, k: str, v: Canvas) -> None:
         if k != v.name:
             raise KeyError(f"The key must be the name of the new child. Given:"
                            f"{k}, expected: {v.name}")
@@ -51,28 +52,28 @@ class CanvasChilds(dict):
         if v.parent != self.canvas:
             v.parent = self.canvas
 
-    def __delitem__(self, k: str):
+    def __delitem__(self, k: str) -> None:
         v = self[k]
         super().__delitem__(k)
         if v.parent == self.canvas:
             v.parent = None
 
-    def update(self, other=None, **kwargs):
+    def update(self, other=None, **kwargs) -> None:
         if other is not None:
             for k, v in other.items() if isinstance(other, Mapping) else other:
                 self[k] = v
         for k, v in kwargs.items():
             self[k] = v
 
-    def copy(self):
+    def copy(self) -> CanvasChilds:
         return type(self)(self.canvas, self)
 
-    def clear(self):
+    def clear(self) -> None:
         while len(self) > 0:
             k, v = self.popitem()
             v.parent = None
 
-    def add(self, *childs: Canvas):
+    def add(self, *childs: Canvas) -> None:
         for c in childs:
             self[c.name] = c
 
@@ -114,31 +115,30 @@ class Canvas(IDrawable):
     """
 
     def __init__(self, name: str = "", parent: Canvas = None,
-                 style: tcp_style.Style = None):
+                 style: Union[dict, tcp_style.Style] = dict()) -> None:
         self.name = name or _genCanvasID()
-        self._geom: Geometry = Geometry(0, 0, 0, 0, 0, 0)
+        self._geom: Geometry = Geometry(0, 0, 0, 0, 0, 0, 0, 0)
 
         self._parent = None
         self.childs: CanvasChilds[str, Canvas] = CanvasChilds(self)
         self._focused_childs = tcp_event.MouseFocus({}, {}, {})
 
-        self.style = style or tcp_style.Style()
+        self._style = None
+        self.style = style
         self.console = self.init_console()
 
-        self._should_redraw = False
+        self._force_redraw = False
 
     @property
-    def should_redraw(self):
-        redraw = self._should_redraw
-        self._should_redraw = False
-        return redraw
+    def force_redraw(self) -> bool:
+        return self._force_redraw
 
-    @should_redraw.setter
-    def should_redraw(self, value: bool):
-        self._should_redraw = value
+    @force_redraw.setter
+    def force_redraw(self, value: bool) -> None:
+        self._force_redraw = value
 
     @property
-    def geometry(self):
+    def geometry(self) -> Geometry:
         """The tiled base geometry of the Canvas, relative to his parent
 
         This is a named tuple with 6 values :
@@ -155,11 +155,11 @@ class Canvas(IDrawable):
         return self._geom
 
     @property
-    def parent(self):
+    def parent(self) -> Canvas:
         return self._parent
 
     @parent.setter
-    def parent(self, value):
+    def parent(self, value) -> None:
         # !!! Order is important, don't touch !!!
         old_parent = self._parent
         self._parent = value
@@ -170,36 +170,56 @@ class Canvas(IDrawable):
             if value is not None and self.name not in value.childs:
                 value.childs[self.name] = self
 
-    # def add_childs(self, *childs: Canvas) -> None:
-    #     for c in childs:
-    #         if c.name in self.childs:
-    #             raise ValueError(f"A canvas with name {c.name} already exist in"
-    #                              f" 'childs' dictionary of canvas {self.name}."
-    #                              f" Canvas must have unique name")
-    #         self.childs[c.name] = c
-
     @property
-    def focused_childs(self):
+    def focused_childs(self) -> tcp_event.MouseFocus:
         """The mouse focused childs."""
         return self._focused_childs
+
+    @property
+    def style(self) -> tcp_style.Style:
+        return self._style
+
+    @style.setter
+    def style(self, value: Union[tcp_style.Style, Mapping]) -> None:
+        self._style = value if isinstance(value, tcp_style.Style) \
+            else tcp_style.Style(value)
+        self.force_redraw = True
+
+    def styles(self) -> tcp_style.Style:
+        return self.style
+
+    def base_drawing(self) -> None:
+        """Draw the base elements of the Canvas.
+
+        It happens in the refresh() method before any child is drawed to the
+        Canvas.
+
+        This method should be overrode if needed. The default behaviour is to
+        clear, with the color defined in style, the underlying Console of the
+        Canvas.
+        """
+        style = self.styles()
+        self.console.clear(bg=style.bg_color, fg=style.fg_color)
 
     def draw(self) -> None:
         """draw the Canvas to the parent Canvas"""
 
-        # This might need to be outsourced to update_geometry
-        # Maybe add some kind of content-size attribute...
-        # think about it
-        if self.style.border:
-            tcp_style.draw_border(self.console, self.style)
+        style = self.styles()
 
-        x, y, width, height = self.geometry[2:]
-        x_max, y_max = self.parent.geometry[4:]
-        x, y = tcp_style.transform_coords(x, y, x_max, y_max, width, height,
-                                          self.style.origin, self.style.outbound)
+        con = None
+        if style.border != tcp_style.Border.NONE:
+            con = tcod.console.Console(*self.geometry[4:6])
+            tcp_style.draw_border(con, style)
+            self.console.blit(con, 1, 1)
+        else:
+            con = self.console
 
-        self.console.blit(self.parent.console, x, y, 0, 0, width, height,
-                          self.style.fg_alpha, self.style.bg_alpha,
-                          self.style.key_color)
+        x, y, width, height = self.geometry[2:6]
+
+        # TODO: improve tcp_style.Outbound.PARTIAL here so that it blit on both
+        # sides if on the edge
+        con.blit(self.parent.console, x, y, 0, 0, width, height,
+                 style.fg_alpha, style.bg_alpha, style.key_color)
 
     def _update_mouse_focus(self, event: tcod.event.MouseMotion) -> None:
         """update the status of IMouseFocusable childs in _focused_childs
@@ -240,6 +260,10 @@ class Canvas(IDrawable):
         nfc = tcp_event.MouseFocus(*[dict(elt) for elt in self._focused_childs])
 
         for c in self.childs.values():
+            style = c.styles()
+            if style.display == tcp_style.Display.NONE:
+                continue
+
             cfc = c.mouse_focused_offsprings()
             nfc.focused.update(cfc.focused)
             nfc.focus_lost.update(cfc.focus_lost)
@@ -256,18 +280,24 @@ class Canvas(IDrawable):
         focusable_childs = [v for v in self.childs.values()
                             if isinstance(v, IKeyboardFocusable)]
         for c in self.childs.values():
+            style = c.styles()
+            if style.display == tcp_style.Display.NONE:
+                continue
             focusable_childs += c.kbd_focusable_offsprings()
         return focusable_childs
 
-    def init_console(self) -> tcod.console.Console:
-        """Init the Console Canvas based on width and height
+    def init_console(self, width: Optional[int] = None,
+                     height: Optional[int] = None) -> tcod.console.Console:
+        """Init the Console Canvas based on content_width and content_height
+
+        Note: It's a bit useless right now
 
         Returns:
             Console : the newly created Console
         """
-        console = tcod.console.Console(self.geometry.width,
-                                       self.geometry.height)
-        console.clear(bg=self.style.bg_color, fg=self.style.fg_color)
+        width = width or self.geometry.content_width
+        height = height or self.geometry.content_height
+        console = tcod.console.Console(width, height)
         return console
 
     def update_geometry(self) -> bool:
@@ -278,34 +308,59 @@ class Canvas(IDrawable):
             Otherwise False
         """
         def relative_geometry() -> Geometry:
-            if self.parent is not None:
-                p_abs_x, p_abs_y, _, _, p_width, p_height = self.parent.geometry
-                x = self.style.x if isinstance(self.style.x, int) \
-                    else round(self.style.x*p_width)
-                y = self.style.y if isinstance(self.style.y, int) \
-                    else round(self.style.y*p_height)
-                abs_x = p_abs_x + x
-                abs_y = p_abs_y + y
-                width = self.style.width if isinstance(self.style.width, int) \
-                    else round(self.style.width*p_width)
-                height = self.style.height if isinstance(self.style.height, int) \
-                    else round(self.style.height*p_height)
+            def autointfloat(val: Union[str, int, float], rel: int,
+                             auto_ret: int) -> int:
+                if val == "auto":
+                    return auto_ret
+                elif isinstance(val, int):
+                    return val
+                elif isinstance(val, float):
+                    return round(val*rel)
 
-                min_width = 0 if self.style.min_width is None \
-                    else self.style.min_width
-                max_width = width if self.style.max_width is None \
-                    else self.style.max_width
-                min_height = 0 if self.style.min_height is None \
-                    else self.style.min_height
-                max_height = height if self.style.max_height is None \
-                    else self.style.max_height
+            if self.parent is not None:
+                p_abs_x, p_abs_y, _, _, _, _, p_c_width, p_c_height = self.parent.geometry
+                p_style = self.parent.styles()
+                p_padding = 0
+                p_has_border = p_style.border != tcp_style.Border.NONE
+
+                # TODO: padding support here
+                style = self.styles()
+                padding = 0
+                has_border = style.border != tcp_style.Border.NONE
+
+                width = autointfloat(style.width, p_c_width,
+                                     self.console.width + 2*(has_border+padding))
+                height = autointfloat(style.height, p_c_height,
+                                      self.console.height + 2*(has_border+padding))
+
+                min_width = style.min_width or 0  # <=> value or None or 0
+                max_width = style.max_width or width
+                min_height = style.min_height or 0
+                max_height = style.max_height or height
 
                 width = sorted([min_width, width, max_width])[1]
                 height = sorted([min_height, height, max_height])[1]
 
-                return Geometry(abs_x, abs_y, x, y, width, height)
+                # 0 is for future use here
+                x = autointfloat(style.x, p_c_width, 0)
+                y = autointfloat(style.y, p_c_height, 0)
 
-            return Geometry(0, 0, 0, 0, 0, 0)
+                x, y = tcp_style.origin_coords(x, y, p_c_width, p_c_height,
+                                               width, height,
+                                               style.origin)
+                x, y = tcp_style.bounded_coords(x, y, p_c_width, p_c_height,
+                                                width, height,
+                                                style.outbound)
+
+                abs_x = p_abs_x + p_padding + p_has_border + x
+                abs_y = p_abs_y + p_padding + p_has_border + y
+                content_width = max(0, width - 2*(has_border + padding))
+                content_height = max(0, height - 2*(has_border + padding))
+
+                return Geometry(abs_x, abs_y, x, y, width, height,
+                                content_width, content_height)
+
+            return self.geometry
 
         geom_new = relative_geometry()
 
@@ -314,8 +369,9 @@ class Canvas(IDrawable):
         self._geom = geom_new
 
         if geom_new[2:] != geom_old[2:]:
-            if geom_new.width != geom_old.width or geom_new.height != geom_old.height:
+            if geom_new[6:] != (self.console.width, self.console.height):
                 self.console = self.init_console()
+                # TODO: blit old console here ?
             return True
 
         return False
@@ -331,25 +387,34 @@ class Canvas(IDrawable):
 
         # refresh childs
         for c in self.childs.values():
-            # c._update_mouse_focus()
+
+            c_style = c.styles()
             up_geom = c.update_geometry()
+            up_redraw = c.force_redraw
+            up_style = c_style.is_modified
+            up_current_child = any([up_geom, up_redraw, up_style])
+            c.force_redraw = False
+            c_style._is_modified = False
             if isinstance(c, IUpdatable):
-                c.should_update = c.should_update or up_geom
-            up = any([c.refresh(), c.should_redraw, up, up_geom])
+                c.should_update = c.should_update or up_current_child
+
+            up = any([c.refresh(), up, up_current_child])
 
         if up:
-            self.console.clear(bg=self.style.bg_color, fg=self.style.fg_color)
+            self.base_drawing()
 
         # update self if necessary
-        if isinstance(self, IUpdatable) \
-                and (self.should_update or up):
+        if isinstance(self, IUpdatable) and (self.should_update or up):
+            if not up:
+                self.base_drawing()
             self.update()
             up = True
 
         # draw childs if necessary
         if up:
             for c in self.childs.values():
-                if c.style.visible:
+                c_style = c.styles()
+                if c_style.visible and c_style.display != tcp_style.Display.NONE:
                     c.draw()
 
         return up
@@ -360,7 +425,7 @@ class Canvas(IDrawable):
     def __str__(self) -> str:
         return (f"{repr(self)}:\n"
                 f"\tparent: {repr(self.parent)}\n"
-                f"\tstyle: {self.style})\n"
+                f"\tstyle: {self.style}\n"
                 f"\tchilds: {self.childs}")
 
 
@@ -387,10 +452,11 @@ class RootCanvas(Canvas):
         style = tcp_style.Style(width=width, height=height,
                                 bg_color=bg_color, fg_color=fg_color)
         super().__init__(style=style)
-        self._geom = Geometry(0, 0, 0, 0, width, height)
+        self._geom = Geometry(0, 0, 0, 0, width, height, width, height)
 
         tcod.console_set_custom_font(font, flags)
-        self.console = tcod.console_init_root(width, height, title)
+        self.console = tcod.console_init_root(width, height, title, fullscreen,
+                                              renderer)
         self.console.clear(bg=bg_color, fg=fg_color)
 
         self.title = title

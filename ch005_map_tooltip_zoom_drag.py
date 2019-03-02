@@ -54,7 +54,8 @@ class ImageMap(canvas.Canvas, interfaces.IMouseFocusable,
                 self.off_x += dcx  # watch out for property...
             if dcy != 0:
                 self.off_y += dcy
-            self.should_update = True
+            if dcx != 0 or dcy != 0:
+                self.should_update = True
 
         self._mouse_dispatcher = tcp_event.CanvasDispatcher()
         self._mouse_dispatcher.ev_mousewheel += [ev_mousewheel]
@@ -101,7 +102,7 @@ class ImageMap(canvas.Canvas, interfaces.IMouseFocusable,
 
     def mousefocus(self, event: tcod.event.MouseMotion) -> bool:
         mcx, mcy = event.tile
-        abs_x, abs_y, _, _, width, height = self.geometry
+        abs_x, abs_y, _, _, width, height, _, _ = self.geometry
         m_rel_x = mcx - abs_x
         m_rel_y = mcy - abs_y
         is_in_x = (0 <= m_rel_x <= width-1)
@@ -115,7 +116,7 @@ class ImageMap(canvas.Canvas, interfaces.IMouseFocusable,
     def update_geometry(self) -> bool:
         up = super().update_geometry()
 
-        width, height = self.geometry.width, self.geometry.height
+        width, height = self.geometry.content_width, self.geometry.content_height
         if self.scale == -1:
             self.scale = round(
                 min(width/self.img.width, height/self.img.height), 2)
@@ -183,7 +184,8 @@ def main() -> None:
     font = "data/fonts/dejavu10x10_gs_tc.png"
     root_canvas = canvas.RootCanvas(width, height,
                                     "Challenge 5: Cleaner Zoom, drag and tooltip",
-                                    font)
+                                    font,
+                                    renderer=tcod.constants.RENDERER_OPENGL)
 
     img_path = "data/img/map-of-europe-clipart.bmp"
     style = tcp_style.Style(x=0, y=0, width=1., height=.5)
