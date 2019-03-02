@@ -38,3 +38,7 @@ Being able to zoom and drag around on the graph is a bonus.
 #### Challenge 8 : Editable ASCII graph
 
 Combine challenge 6 and 7 to have an editable ASCII graph, meaning that you can input a function via an input box and render the resulting graph immediately
+
+#### Challenge 9 : Name generation
+
+Generate some names randomly
